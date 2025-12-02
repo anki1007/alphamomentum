@@ -7,44 +7,111 @@ import yfinance as yf
 from typing import List, Dict
 
 
-# -------------------- PAGE & GLOBAL STYLE --------------------
 st.set_page_config(page_title="Alpha Momentum Screener", layout="wide")
 
 st.markdown("""
 <style>
+
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap');
 
-:root { --app-font: 'Plus Jakarta Sans', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
-html, body, [class*="css"], .stMarkdown, .stText, .stSelectbox, .stButton, .stDataFrame {
+:root {
+  --app-font: 'Plus Jakarta Sans', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  --bg: #0b0e13;                 /* deep charcoal */
+  --bg-2: #10141b;               /* panel bg */
+  --border: #1f2732;             /* graphite border */
+  --border-soft: #1a2230;
+  --text: #e6eaee;               /* high-contrast text */
+  --text-dim: #b3bdc7;           /* secondary text */
+  --accent: #7a5cff;             /* violet accent */
+  --accent-2: #2bb0ff;           /* cyan accent */
+}
+
+/* App background + text */
+html, body, .stApp {
+  background: var(--bg) !important;
+  color: var(--text) !important;
   font-family: var(--app-font) !important;
 }
 
-.block-container { padding-top: 1.2rem; }
+.block-container { padding-top: 0.8rem; }
 
-/* Hero title */
+/* Hero title (subtle, institutional) */
 .hero-title {
-  font-weight: 800; font-size: clamp(28px, 5vw, 60px); line-height: 1.1;
-  margin: 6px 0 12px 0;
-  background: linear-gradient(90deg, #2bb0ff, #7a5cff 45%, #ff6cab 90%);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
+  font-weight: 800;
+  font-size: clamp(26px, 4.5vw, 40px);
+  line-height: 1.05;
+  margin: 18px 0 10px 0;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent) 60%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
   letter-spacing: .2px;
 }
 
-/* Sidebar labels */
-section[data-testid="stSidebar"] label { font-weight: 700; }
+/* Sidebar panel */
+section[data-testid="stSidebar"] {
+  background: var(--bg-2) !important;
+  border-right: 1px solid var(--border);
+}
+section[data-testid="stSidebar"] * { color: var(--text) !important; }
+section[data-testid="stSidebar"] label { font-weight: 700; color: var(--text-dim) !important; }
 
-/* Table polish */
-a { text-decoration: none; }
+/* Buttons */
+.stButton button {
+  background: linear-gradient(180deg, #1b2432, #131922);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.stButton button:hover { filter: brightness(1.06); }
+
+/* ---- Pro table card ---- */
+.pro-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 6px 10px 10px 10px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+}
+
+/* Table: dense & crisp */
+a { text-decoration: none; color: #9ecbff; }
 a:hover { text-decoration: underline; }
-table { border-collapse: collapse; font-size: 0.95rem; width: 100%; }
-thead th { position: sticky; top: 0; z-index: 1; background: #e9f0f7; }
-th, td { border: 1px solid #c9d1d9; padding: 6px 10px; }
-tbody tr:hover td { filter: brightness(0.98); }
+
+table { 
+  border-collapse: collapse; 
+  font-size: 0.86rem;          /* denser typography */
+  width: 100%; 
+  color: var(--text);
+}
+thead th { 
+  position: sticky; top: 0; z-index: 2; 
+  background: #121823; 
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 8px;            /* compact header */
+  white-space: nowrap;
+}
+tbody td { 
+  padding: 6px 8px;            /* compact rows */
+  border-top: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
+
+/* Alignment: left for text columns, right for numbers */
+td[data-col="Name"], th[data-col="Name"],
+td[data-col="Industry"], th[data-col="Industry"] { text-align: left; }
+td[data-col="num"], th[data-col="num"] { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Hover */
+tbody tr:hover td { background: rgba(255,255,255,0.02) !important; }
+
+/* Subheader */
+h2, .stMarkdown h2 { color: var(--text); }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="hero-title">Alpha Momentum Screener</div>', unsafe_allow_html=True)
-
 
 # -------------------- CONFIG --------------------
 BENCHMARKS: Dict[str, str] = {
@@ -65,22 +132,18 @@ CSV_FILES: Dict[str, str] = {
     "Nifty Total Market":  GITHUB_BASE + "niftytotalmarket.csv",
 }
 
-RS_LOOKBACK_DAYS = 252          # ~1 year for RS window
-JDK_WINDOW = 21                 # standard JdK window
-
+RS_LOOKBACK_DAYS = 252
+JDK_WINDOW = 21
 
 # -------------------- HELPERS --------------------
 def tv_symbol_from_yf(symbol: str) -> str:
     s = symbol.strip().upper()
     return "NSE:" + s[:-3] if s.endswith(".NS") else "NSE:" + s
 
-
 def tradingview_chart_url(symbol: str) -> str:
     return f"https://in.tradingview.com/chart/?symbol={tv_symbol_from_yf(symbol)}"
 
-
 def _pick_close(df: pd.DataFrame | pd.Series, symbol: str) -> pd.Series:
-    """Pick Close/Adj Close robustly from yfinance multi/single index."""
     if isinstance(df, pd.Series):
         return pd.to_numeric(df, errors="coerce").dropna()
     if not isinstance(df, pd.DataFrame) or df.empty:
@@ -98,9 +161,7 @@ def _pick_close(df: pd.DataFrame | pd.Series, symbol: str) -> pd.Series:
                 return pd.to_numeric(df[col], errors="coerce").dropna()
         return pd.Series(dtype=float)
 
-
 def jdk_components(price: pd.Series, bench: pd.Series, win: int = JDK_WINDOW):
-    """Compute JdK RS-Ratio ~100 baseline and RS-Momentum ~101 baseline."""
     df = pd.concat([price.rename("p"), bench.rename("b")], axis=1).dropna()
     if df.empty:
         return pd.Series(dtype=float), pd.Series(dtype=float)
@@ -118,34 +179,26 @@ def jdk_components(price: pd.Series, bench: pd.Series, win: int = JDK_WINDOW):
     ix = rs_ratio.index.intersection(rs_mom.index)
     return rs_ratio.loc[ix], rs_mom.loc[ix]
 
-
 def perf_quadrant(x: float, y: float) -> str:
     if x >= 100 and y >= 100: return "Leading"
     if x < 100 and y >= 100:  return "Improving"
     if x < 100 and y < 100:   return "Lagging"
     return "Weakening"
 
-
 def analyze_momentum(adj: pd.Series) -> dict | None:
-    """Basic momentum filters + compute 6M/3M/1M returns on pass."""
     if adj is None or adj.empty or len(adj) < 252:
         return None
-
     ema100 = adj.ewm(span=100, adjust=False).mean()
     try:
         one_year_return = (adj.iloc[-1] / adj.iloc[-252] - 1.0) * 100.0
     except Exception:
         return None
-
     high_52w = adj.iloc[-252:].max()
     within_20pct_high = adj.iloc[-1] >= high_52w * 0.8
-
     if len(adj) < 126:
         return None
-
     six_month = adj.iloc[-126:]
     up_days_pct = (six_month.pct_change() > 0).sum() / len(six_month) * 100.0
-
     if (adj.iloc[-1] >= ema100.iloc[-1] and one_year_return >= 6.5 and
         within_20pct_high and up_days_pct > 45.0):
         try:
@@ -157,10 +210,8 @@ def analyze_momentum(adj: pd.Series) -> dict | None:
         return {"Return_6M": r6, "Return_3M": r3, "Return_1M": r1}
     return None
 
-
 @st.cache_data(show_spinner=False)
 def load_universe_from_csv(url: str) -> pd.DataFrame:
-    """Load and normalize universe CSV fields to Symbol/Name/Industry."""
     df = pd.read_csv(url)
     cols = {c.strip().lower(): c for c in df.columns}
     required = ["symbol", "company name", "industry"]
@@ -176,33 +227,23 @@ def load_universe_from_csv(url: str) -> pd.DataFrame:
     df = df[df["Symbol"] != ""].drop_duplicates(subset=["Symbol"])
     return df
 
-
 def _period_years_to_dates(period: str) -> tuple[pd.Timestamp, pd.Timestamp]:
-    """
-    Convert '1y'/'2y'/'3y'/'5y' to explicit (start, end) dates anchored to 'today' IST.
-    yfinance 'end' is exclusive, so end = today + 1 day to include today's EOD when available.
-    """
     years_map = {"1y": 1, "2y": 2, "3y": 3, "5y": 5}
     years = years_map.get(period, 2)  # default 2y
     today_ist = pd.Timestamp.now(tz="Asia/Kolkata").normalize()
-    end = today_ist + pd.Timedelta(days=1)     # exclusive
+    end = today_ist + pd.Timedelta(days=1)      # exclusive, ensures today included
     start = today_ist - pd.DateOffset(years=years)
     return start, end
 
-
 @st.cache_data(show_spinner=True)
 def fetch_prices(tickers: List[str], benchmark: str, period: str, interval: str = "1d") -> pd.DataFrame:
-    """
-    EOD-only downloader fetching from explicit [start, end) so the latest date is today.
-    """
-    interval = "1d"  # force EOD
+    interval = "1d"  # EOD only
     start, end = _period_years_to_dates(period)
-
     try:
         data = yf.download(
             tickers + [benchmark],
             start=start.date().isoformat(),
-            end=end.date().isoformat(),   # exclusive, so +1d ensures today is included
+            end=end.date().isoformat(),
             interval=interval,
             auto_adjust=True,
             group_by="ticker",
@@ -218,20 +259,17 @@ def fetch_prices(tickers: List[str], benchmark: str, period: str, interval: str 
         return pd.DataFrame()
 
     if not isinstance(data.index, pd.DatetimeIndex):
-        try:
-            data.index = pd.to_datetime(data.index)
-        except Exception:
-            pass
+        try: data.index = pd.to_datetime(data.index)
+        except Exception: pass
     return data
 
-
+# ---------- Rank band colors tuned for dark mode (Bloomberg-like) ----------
 def row_bg_for_serial(sno: int) -> str:
-    """Color bands by rank buckets."""
-    if sno <= 30: return "#dff5df"  # light green
-    if sno <= 60: return "#fff6b3"  # light yellow
-    if sno <= 90: return "#dfe9ff"  # light blue
-    return "#f7d6d6"                # light red
-
+    # Top 30 = green tint; next 30 = amber; next 30 = blue; rest = red
+    if sno <= 30: return "rgba(46, 204, 113, 0.12)"   # green tint
+    if sno <= 60: return "rgba(255, 204, 0, 0.12)"    # amber tint
+    if sno <= 90: return "rgba(52, 152, 219, 0.12)"   # blue tint
+    return "rgba(231, 76, 60, 0.12)"                  # red tint
 
 def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.DataFrame) -> pd.DataFrame:
     bench = _pick_close(raw, benchmark).dropna()
@@ -278,7 +316,7 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
         raise RuntimeError("No tickers passed the filters. Try a longer Period (e.g., 3y) with 1d timeframe.")
     df = pd.DataFrame(rows)
 
-    # Round and ranks
+    # Round + ranks
     for c in ("Return_6M", "Return_3M", "Return_1M"):
         df[c] = pd.to_numeric(df[c], errors="coerce").round(1)
     df["RS-Ratio"] = pd.to_numeric(df["RS-Ratio"], errors="coerce").round(2)
@@ -301,50 +339,66 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
              "Final_Rank", "Position", "Chart", "Symbol"]
     return df[order]
 
-
 def style_rows(df: pd.DataFrame):
     """
-    Row banding + alignment; allow HTML on Name.
-    Fix for Pandas 2.2+:
-      - use styler.format(escape=None) to disable escaping
-      - then styler.format({"Name": lambda v: v}) to keep HTML links
+    Institutional row styling + alignment + HTML links (Pandas 2.2+ safe).
     """
     def _row_style(r: pd.Series):
         bg = row_bg_for_serial(int(r["S.No"]))
+      
+      
         return [f"background-color: {bg}"] * len(df.columns)
 
     styler = df.style.apply(lambda rr: _row_style(rr), axis=1)
-    styler = styler.set_properties(subset=["Name", "Industry"], **{"text-align": "left"})
-    styler = styler.set_properties(
-        subset=[c for c in df.columns if c not in ("Name", "Industry")],
-        **{"text-align": "center"}
-    )
 
-    # NEW API for Pandas 2.2+ (fixes: "escape only permitted in {'html', 'latex', 'latex-math'}, got False")
-    styler = styler.format(escape=None)       # disable escaping globally
-    styler = styler.format({"Name": lambda v: v})  # keep Name HTML
+  
+    text_cols = ["Name", "Industry"]
+    num_cols = [c for c in df.columns if c not in text_cols]
 
-    try:
-        styler = styler.hide(axis="index")
-    except Exception:
-        pass
+    
+  
+    styler = styler.format(escape=None)
+    
+  
+    styler = styler.format({"Name": lambda v: v})
+
+ 
+  
+    th_styles = [{"selector": f"th.col{i}", "props": f'data-col: {"Name" if col=="Name" else ("Industry" if col=="Industry" else "num")};'} 
+                 for i, col in enumerate(df.columns)]
+
+  
+    base_styles = [
+        {"selector": "table", "props": "border-collapse: collapse;"},
+    ]
+
+    styler = styler.set_table_styles(base_styles + th_styles)
+
+   
+  
+    styler = styler.set_properties(subset=text_cols, **{"text-align": "left"})
+    styler = styler.set_properties(subset=num_cols, **{"text-align": "right", "font-variant-numeric": "tabular-nums"})
+
+    # Hide index if available
+    try: styler = styler.hide(axis="index")
+    except Exception: pass
+
     return styler
 
 
-# -------------------- SIDEBAR (DEFAULTS) --------------------
+
 st.sidebar.header("Controls")
-# Defaults: Benchmark = "Nifty 500", Universe = "Nifty 200", Timeframe (EOD only) = 1d, Period = 2y
-indices_universe = st.sidebar.selectbox("Indices Universe", list(CSV_FILES.keys()), index=0)  # "Nifty 200"
-benchmark_key    = st.sidebar.selectbox("Benchmark", list(BENCHMARKS.keys()), index=2)        # "Nifty 500"
+indices_universe = st.sidebar.selectbox("Indices Universe", list(CSV_FILES.keys()), index=0)  # Nifty 200
+benchmark_key    = st.sidebar.selectbox("Benchmark", list(BENCHMARKS.keys()), index=2)        # Nifty 500
 timeframe        = st.sidebar.selectbox("Timeframe (EOD only)", ["1d"], index=0)              # locked to 1d
-period           = st.sidebar.selectbox("Period", ["1y", "2y", "3y", "5y"], index=1)          # default "2y"
+period           = st.sidebar.selectbox("Period", ["1y", "2y", "3y", "5y"], index=1)          # default 2y
 do_load          = st.sidebar.button("Load / Refresh", use_container_width=True)
 
-# Auto-run on first visit
-if "ran_once" not in st.session_state:
-    st.session_state.ran_once = True
-    do_load = True
 
+
+if "ran_once" not in st.session_state:
+  st.session_state.ran_once = True
+  do_load = True
 
 # -------------------- ACTION --------------------
 if do_load:
@@ -363,7 +417,8 @@ if do_load:
 
         df = build_table_dataframe(raw, benchmark, universe_df)
 
-        # Build UI view (hyperlink on Name; hide Chart)
+      
+      
         ui_cols = [
             "S.No", "Name", "Industry",
             "Return_6M", "Rank_6M",
@@ -379,16 +434,21 @@ if do_load:
         )
         display_df = display_df.drop(columns=["Chart"])
 
-        st.subheader("Screened Momentum Table")
-        st.markdown(style_rows(display_df).to_html(), unsafe_allow_html=True)
+        st.subheader("Alpha Momentum 30")
+
+       
+      
+        table_html = style_rows(display_df).to_html()
+        st.markdown(f'<div class="pro-card">{table_html}</div>', unsafe_allow_html=True)
 
         st.caption(f"{len(df)} results • {indices_universe} • {benchmark_key} • 1d EOD • {period}")
 
-        # Export (hide Symbol in export to match UI; change if you prefer keeping it)
+      
+      
         csv_bytes = df.drop(columns=["Symbol"]).to_csv(index=False).encode("utf-8")
         st.download_button(
             "Export CSV",
-            csv_bytes,
+            data=csv_bytes,
             file_name=f"{indices_universe.replace(' ', '').lower()}_momentum.csv",
             mime="text/csv",
             use_container_width=True,
