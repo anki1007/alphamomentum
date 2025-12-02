@@ -307,7 +307,7 @@ def load_universe_from_csv(url: str) -> pd.DataFrame:
     return df
 
 def _period_years_to_dates(period: str) -> tuple[pd.Timestamp, pd.Timestamp]:
-    years_map = {"1y": 1, "2y": 2, "3y": 3, "5y": 5}
+    years_map = {"2y": 2, "3y": 3, "5y": 5}
     years = years_map.get(period, 2)
     today_ist = pd.Timestamp.now(tz="Asia/Kolkata").normalize()
     end = today_ist + pd.Timedelta(days=1)
@@ -499,7 +499,7 @@ if do_load:
             "Return_3M", "Rank_3M",
             "Return_1M", "Rank_1M",
             "RS-Ratio", "RS-Momentum", "Performance",
-            "Final_Rank", "Position", "Chart"
+            "Position", "Chart"
         ]
         display_df = df[ui_cols].copy()
         display_df["Name"] = display_df.apply(
@@ -526,3 +526,4 @@ if do_load:
 
     except Exception as e:
         st.error(str(e))
+
