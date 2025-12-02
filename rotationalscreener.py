@@ -30,10 +30,12 @@ THEMES = {
             "--text-dim": "#9eabbc",
             "--accent": "#00c3ff",
             "--accent-2": "#ffb300",
+            # Performance colors
             "--perf-leading": "rgba(46, 204, 113, 0.25)",
             "--perf-improving": "rgba(52, 152, 219, 0.25)",
             "--perf-lagging": "rgba(231, 76, 60, 0.25)",
             "--perf-weakening": "rgba(255, 204, 0, 0.30)",
+            # Row banding
             "--band-top": "rgba(46, 204, 113, 0.12)",
             "--band-mid1": "rgba(255, 204, 0, 0.12)",
             "--band-mid2": "rgba(52, 152, 219, 0.12)",
@@ -393,19 +395,22 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
         raise RuntimeError("No tickers passed the filters. Try a longer Period (e.g., 3y) with 1d timeframe.")
     df = pd.DataFrame(rows)
 
+  
     for c in ("Return_6M", "Return_3M", "Return_1M"):
-        df[c] = pd.to_numeric(df[c], errors="coerce").round(1)
+        df[c] = pd.to_numeric(df[c], errors="coerce").round(2)
+   
     df["RS-Ratio"] = pd.to_numeric(df["RS-Ratio"], errors="coerce").round(2)
     df["RS-Momentum"] = pd.to_numeric(df["RS-Momentum"], errors="coerce").round(2)
+  
+    df["Rank_6M"] = df["Return_6M"].rank(ascending=False, method="min").astype(int)
+    df["Rank_3M"] = df["Return_3M"].rank(ascending=False, method="min").astype(int)
+    df["Rank_1M"] = df["Return_1M"].rank(ascending=False, method="min").astype(int)
+    df["Final_Rank"] = (df["Rank_6M"] + df["Rank_3M"] + df["Rank_1M"]).astype(int)
 
-    df["Rank_6M"] = df["Return_6M"].rank(ascending=False, method="min")
-    df["Rank_3M"] = df["Return_3M"].rank(ascending=False, method="min")
-    df["Rank_1M"] = df["Return_1M"].rank(ascending=False, method="min")
-    df["Final_Rank"] = df["Rank_6M"] + df["Rank_3M"] + df["Rank_1M"]
-
+    # Sort by RS first as per UI
     df = df.sort_values(by=["RS-Momentum", "RS-Ratio"], ascending=[False, False]).reset_index(drop=True)
-    df.insert(0, "S.No", np.arange(1, len(df) + 1))
-    df["Position"] = df["S.No"]
+    df.insert(0, "S.No", np.arange(1, len(df) + 1).astype(int))
+    df["Position"] = df["S.No"].astype(int)
 
     order = ["S.No", "Name", "Industry",
              "Return_6M", "Rank_6M",
@@ -422,7 +427,7 @@ def style_rows(df: pd.DataFrame) -> pd.io.formats.style.Styler:
 
     styler = df.style.apply(lambda rr: _row_style(rr), axis=1).format(escape=None)
 
-    # Alignment: Name & Industry left; all others centered
+
     left_cols = ["Name", "Industry"]
     center_cols = [c for c in df.columns if c not in left_cols]
 
@@ -432,11 +437,11 @@ def style_rows(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         "font-variant-numeric": "tabular-nums"
     })
 
-    # Keep base table style
+ 
     base_rules = [{"selector": "table", "props": "border-collapse: collapse;"}]
     styler = styler.set_table_styles(base_rules)
 
-    # Performance color mapping
+   
     perf_color_map = {
         "Leading":   "var(--perf-leading)",
         "Improving": "var(--perf-improving)",
@@ -458,9 +463,7 @@ def style_rows(df: pd.DataFrame) -> pd.io.formats.style.Styler:
             pass
     return styler
 
-# =========================================================
-# Controls
-# =========================================================
+
 st.sidebar.header("Controls")
 indices_universe = st.sidebar.selectbox("Indices Universe", list(CSV_FILES.keys()), index=0)
 benchmark_key    = st.sidebar.selectbox("Benchmark", list(BENCHMARKS.keys()), index=2)
@@ -472,9 +475,7 @@ if "ran_once" not in st.session_state:
     st.session_state.ran_once = True
     do_load = True
 
-# =========================================================
-# Action
-# =========================================================
+
 if do_load:
     try:
         uni_url = CSV_FILES[indices_universe]
@@ -491,13 +492,14 @@ if do_load:
 
         df = build_table_dataframe(raw, benchmark, universe_df)
 
+      
         ui_cols = [
             "S.No", "Name", "Industry",
             "Return_6M", "Rank_6M",
             "Return_3M", "Rank_3M",
             "Return_1M", "Rank_1M",
             "RS-Ratio", "RS-Momentum", "Performance",
-            "Position", "Chart"
+            "Final_Rank", "Position", "Chart"
         ]
         display_df = df[ui_cols].copy()
         display_df["Name"] = display_df.apply(
@@ -506,13 +508,13 @@ if do_load:
         )
         display_df = display_df.drop(columns=["Chart"])
 
-        # No Top-N cap — show all rows
+     
         table_html = style_rows(display_df).to_html()
         st.markdown(f'<div class="pro-card">{table_html}</div>', unsafe_allow_html=True)
 
         st.caption(f"{len(df)} results in universe • {indices_universe} • {benchmark_key} • 1d EOD • {period}")
 
-        # Export CSV (Symbol excluded)
+        # Export CSV
         csv_bytes = df.drop(columns=["Symbol"]).to_csv(index=False).encode("utf-8")
         st.download_button(
             "Export CSV",
