@@ -6,125 +6,211 @@ import streamlit as st
 import yfinance as yf
 from typing import List, Dict
 
+# =========================================================
+# Page config
+# =========================================================
+st.set_page_config(page_title="Rotational Momentum Screener", layout="wide")
 
-st.set_page_config(page_title="Alpha Momentum Screener", layout="wide")
-
-st.markdown("""
-<style>
-
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap');
-
-:root {
-  --app-font: 'Plus Jakarta Sans', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-  --bg: #0b0e13;                 /* deep charcoal */
-  --bg-2: #10141b;               /* panel bg */
-  --border: #1f2732;             /* graphite border */
-  --border-soft: #1a2230;
-  --text: #e6eaee;               /* high-contrast text */
-  --text-dim: #b3bdc7;           /* secondary text */
-  --accent: #7a5cff;             /* violet accent */
-  --accent-2: #2bb0ff;           /* cyan accent */
+# =========================================================
+# THEME SYSTEM (Bloomberg-style + variants)
+# =========================================================
+THEMES = {
+    "Bloomberg Dark": {
+        "import_font": """
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap');
+        """,
+        "vars": {
+            "--app-font": "'IBM Plex Sans', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
+            "--mono-font": "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
+            "--bg": "#0a0b0d",
+            "--bg-2": "#111317",
+            "--border": "#222836",
+            "--border-soft": "#1a1f2a",
+            "--text": "#e7ebf0",
+            "--text-dim": "#9eabbc",
+            "--accent": "#00c3ff",
+            "--accent-2": "#ffb300",
+            # Performance colors (fixed per spec)
+            "--perf-leading": "rgba(46, 204, 113, 0.25)",   # green
+            "--perf-improving": "rgba(52, 152, 219, 0.25)", # blue
+            "--perf-lagging": "rgba(231, 76, 60, 0.25)",    # red
+            "--perf-weakening": "rgba(255, 204, 0, 0.30)",  # yellow
+            # Row banding
+            "--band-top": "rgba(46, 204, 113, 0.12)",
+            "--band-mid1": "rgba(255, 204, 0, 0.12)",
+            "--band-mid2": "rgba(52, 152, 219, 0.12)",
+            "--band-rest": "rgba(231, 76, 60, 0.12)",
+        },
+    },
+    "Bloomberg Light": {
+        "import_font": """
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap');
+        """,
+        "vars": {
+            "--app-font": "'IBM Plex Sans', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
+            "--mono-font": "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
+            "--bg": "#f6f7f9",
+            "--bg-2": "#ffffff",
+            "--border": "#d9dee5",
+            "--border-soft": "#e8ecf2",
+            "--text": "#151a22",
+            "--text-dim": "#596579",
+            "--accent": "#007aff",
+            "--accent-2": "#ff8a00",
+            "--perf-leading": "rgba(46, 204, 113, 0.20)",
+            "--perf-improving": "rgba(52, 152, 219, 0.20)",
+            "--perf-lagging": "rgba(231, 76, 60, 0.20)",
+            "--perf-weakening": "rgba(255, 204, 0, 0.25)",
+            "--band-top": "rgba(46, 204, 113, 0.12)",
+            "--band-mid1": "rgba(255, 204, 0, 0.12)",
+            "--band-mid2": "rgba(52, 152, 219, 0.12)",
+            "--band-rest": "rgba(231, 76, 60, 0.10)",
+        },
+    },
+    "Terminal Dark": {
+        "import_font": """
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap');
+        """,
+        "vars": {
+            "--app-font": "'IBM Plex Sans Condensed', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
+            "--mono-font": "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
+            "--bg": "#0b0c10",
+            "--bg-2": "#0f1116",
+            "--border": "#242a38",
+            "--border-soft": "#1a1f2b",
+            "--text": "#e5ecf3",
+            "--text-dim": "#9aa7bb",
+            "--accent": "#10e7ff",
+            "--accent-2": "#ffcd00",
+            "--perf-leading": "rgba(46, 204, 113, 0.25)",
+            "--perf-improving": "rgba(52, 152, 219, 0.25)",
+            "--perf-lagging": "rgba(231, 76, 60, 0.25)",
+            "--perf-weakening": "rgba(255, 204, 0, 0.30)",
+            "--band-top": "rgba(46, 204, 113, 0.14)",
+            "--band-mid1": "rgba(255, 204, 0, 0.14)",
+            "--band-mid2": "rgba(52, 152, 219, 0.14)",
+            "--band-rest": "rgba(231, 76, 60, 0.14)",
+        },
+    },
 }
 
-/* App background + text */
-html, body, .stApp {
-  background: var(--bg) !important;
-  color: var(--text) !important;
-  font-family: var(--app-font) !important;
-}
+def render_theme_css(theme_name: str):
+    theme = THEMES[theme_name]
+    vars_css = "\n".join(f"{k}: {v};" for k, v in theme["vars"].items())
+    st.markdown(f"""
+    <style>
+    {theme["import_font"]}
 
-.block-container { padding-top: 2.0rem; }
+    :root {{
+        {vars_css}
+    }}
 
-/* Hero title (subtle, institutional) */
-.hero-title {
-  font-weight: 800;
-  font-size: clamp(26px, 4.5vw, 40px);
-  line-height: 1.05;
-  margin: 18px 0 10px 0;
-  background: linear-gradient(90deg, var(--accent-2), var(--accent) 60%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  letter-spacing: .2px;
-}
+    html, body, .stApp {{
+      background: var(--bg) !important;
+      color: var(--text) !important;
+      font-family: var(--app-font) !important;
+    }}
+    .block-container {{ padding-top: 1.6rem; }}
 
-/* Sidebar panel */
-section[data-testid="stSidebar"] {
-  background: var(--bg-2) !important;
-  border-right: 1px solid var(--border);
-}
-section[data-testid="stSidebar"] * { color: var(--text) !important; }
-section[data-testid="stSidebar"] label { font-weight: 700; color: var(--text-dim) !important; }
+    .hero-title {{
+      font-weight: 700;
+      font-size: clamp(24px, 4vw, 36px);
+      line-height: 1.05;
+      margin: 14px 0 8px 0;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2) 70%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      letter-spacing: .2px;
+    }}
 
-/* Buttons */
-.stButton button {
-  background: linear-gradient(180deg, #1b2432, #131922);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-}
-.stButton button:hover { filter: brightness(1.06); }
+    /* Sidebar */
+    section[data-testid="stSidebar"] {{
+      background: var(--bg-2) !important;
+      border-right: 1px solid var(--border);
+    }}
+    section[data-testid="stSidebar"] * {{ color: var(--text) !important; }}
+    section[data-testid="stSidebar"] label {{ font-weight: 600; color: var(--text-dim) !important; }}
 
-/* ---- Pro table card ---- */
-.pro-card {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 6px 10px 10px 10px;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
-}
+    /* Buttons */
+    .stButton button {{
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.20));
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }}
+    .stButton button:hover {{ filter: brightness(1.06); }}
 
-/* Table: dense & crisp */
-a { text-decoration: none; color: #9ecbff; }
-a:hover { text-decoration: underline; }
+    /* Card */
+    .pro-card {{
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 6px 10px 10px 10px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+    }}
 
-table { 
-  border-collapse: collapse; 
-  font-size: 0.86rem;          /* denser typography */
-  width: 100%; 
-  color: var(--text);
-}
-thead th { 
-  position: sticky; top: 0; z-index: 2; 
-  background: #121823; 
-  color: var(--text-dim);
-  border-bottom: 1px solid var(--border);
-  padding: 6px 8px;            /* compact header */
-  white-space: nowrap;
-}
-tbody td { 
-  padding: 6px 8px;            /* compact rows */
-  border-top: 1px solid var(--border-soft);
-  white-space: nowrap;
-}
+    /* Links */
+    a {{ text-decoration: none; color: var(--accent); }}
+    a:hover {{ text-decoration: underline; }}
 
-/* Alignment: left for text columns, right for numbers */
-td[data-col="Name"], th[data-col="Name"],
-td[data-col="Industry"], th[data-col="Industry"] { text-align: left; }
-td[data-col="num"], th[data-col="num"] { text-align: right; font-variant-numeric: tabular-nums; }
+    /* Table */
+    table {{
+      border-collapse: collapse;
+      font-size: 0.86rem;
+      width: 100%;
+      color: var(--text);
+    }}
+    thead th {{
+      position: sticky; top: 0; z-index: 2;
+      background: color-mix(in oklab, var(--bg-2), #000 8%);
+      color: var(--text-dim);
+      border-bottom: 1px solid var(--border);
+      padding: 6px 8px;
+      white-space: nowrap;
+      font-weight: 600;
+    }}
+    tbody td {{
+      padding: 6px 8px;
+      border-top: 1px solid var(--border-soft);
+      white-space: nowrap;
+    }}
+    tbody tr:hover td {{ background: rgba(255,255,255,0.03) !important; }}
 
-/* Hover */
-tbody tr:hover td { background: rgba(255,255,255,0.02) !important; }
+    /* Header alignment using nth-child to mirror cell alignment */
+    /* Name, Industry left; rest right */
+    thead th:nth-child(1),
+    thead th:nth-child(2),
+    thead th:nth-child(3) {{ text-align: left; }}
+    thead th:nth-child(n+4) {{ text-align: right; }}
 
-/* Subheader */
-h2, .stMarkdown h2 { color: var(--text); }
-</style>
-""", unsafe_allow_html=True)
+    h2, .stMarkdown h2 {{ color: var(--text); }}
+    </style>
+    """, unsafe_allow_html=True)
+
+# =========================================================
+# UI header (after theme inject)
+# =========================================================
+st.sidebar.header("Appearance")
+theme_choice = st.sidebar.selectbox("Theme", list(THEMES.keys()), index=0)
+render_theme_css(theme_choice)
 
 st.markdown('<div class="hero-title">Alpha Momentum Screener</div>', unsafe_allow_html=True)
 
-# -------------------- CONFIG --------------------
+# =========================================================
+# DATA / CONFIG
+# =========================================================
 BENCHMARKS: Dict[str, str] = {
     "NIFTY 50": "^NSEI",
     "Nifty 200": "^CNX200",
-    "Nifty 500": "^CRSLDX",             # default benchmark
+    "Nifty 500": "^CRSLDX",                   # if this ever fails, swap to a suitable proxy
     "Nifty Midcap 150": "^NIFTYMIDCAP150.NS",
     "Nifty Smallcap 250": "^NIFTYSMLCAP250.NS",
 }
 
 GITHUB_BASE = "https://raw.githubusercontent.com/anki1007/alphamomentum/main/"
 CSV_FILES: Dict[str, str] = {
-    "Nifty 200":           GITHUB_BASE + "nifty200.csv",      # default universe
+    "Nifty 200":           GITHUB_BASE + "nifty200.csv",
     "Nifty 500":           GITHUB_BASE + "nifty500.csv",
     "Nifty Midcap 150":    GITHUB_BASE + "niftymidcap150.csv",
     "Nifty Mid Small 400": GITHUB_BASE + "niftymidsmallcap400.csv",
@@ -135,7 +221,9 @@ CSV_FILES: Dict[str, str] = {
 RS_LOOKBACK_DAYS = 252
 JDK_WINDOW = 21
 
-# -------------------- HELPERS --------------------
+# =========================================================
+# Helpers
+# =========================================================
 def tv_symbol_from_yf(symbol: str) -> str:
     s = symbol.strip().upper()
     return "NSE:" + s[:-3] if s.endswith(".NS") else "NSE:" + s
@@ -210,7 +298,7 @@ def analyze_momentum(adj: pd.Series) -> dict | None:
         return {"Return_6M": r6, "Return_3M": r3, "Return_1M": r1}
     return None
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=3600)
 def load_universe_from_csv(url: str) -> pd.DataFrame:
     df = pd.read_csv(url)
     cols = {c.strip().lower(): c for c in df.columns}
@@ -231,11 +319,11 @@ def _period_years_to_dates(period: str) -> tuple[pd.Timestamp, pd.Timestamp]:
     years_map = {"1y": 1, "2y": 2, "3y": 3, "5y": 5}
     years = years_map.get(period, 2)  # default 2y
     today_ist = pd.Timestamp.now(tz="Asia/Kolkata").normalize()
-    end = today_ist + pd.Timedelta(days=1)      # exclusive, ensures today included
+    end = today_ist + pd.Timedelta(days=1)  # exclusive, ensures today included
     start = today_ist - pd.DateOffset(years=years)
     return start, end
 
-@st.cache_data(show_spinner=True)
+@st.cache_data(show_spinner=True, ttl=1800)
 def fetch_prices(tickers: List[str], benchmark: str, period: str, interval: str = "1d") -> pd.DataFrame:
     interval = "1d"  # EOD only
     start, end = _period_years_to_dates(period)
@@ -263,13 +351,12 @@ def fetch_prices(tickers: List[str], benchmark: str, period: str, interval: str 
         except Exception: pass
     return data
 
-# ---------- Rank band colors tuned for dark mode (Bloomberg-like) ----------
+# Row band colors read from CSS vars
 def row_bg_for_serial(sno: int) -> str:
-    # Top 30 = green tint; next 30 = amber; next 30 = blue; rest = red
-    if sno <= 30: return "rgba(46, 204, 113, 0.12)"   # green tint
-    if sno <= 60: return "rgba(255, 204, 0, 0.12)"    # amber tint
-    if sno <= 90: return "rgba(52, 152, 219, 0.12)"   # blue tint
-    return "rgba(231, 76, 60, 0.12)"                  # red tint
+    if sno <= 30: return "var(--band-top)"
+    if sno <= 60: return "var(--band-mid1)"
+    if sno <= 90: return "var(--band-mid2)"
+    return "var(--band-rest)"
 
 def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.DataFrame) -> pd.DataFrame:
     bench = _pick_close(raw, benchmark).dropna()
@@ -327,7 +414,8 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
     df["Rank_1M"] = df["Return_1M"].rank(ascending=False, method="min")
     df["Final_Rank"] = df["Rank_6M"] + df["Rank_3M"] + df["Rank_1M"]
 
-    df = df.sort_values("Final_Rank", kind="mergesort").reset_index(drop=True)
+    # >>> Bloomberg-style order: RS-Momentum desc, then RS-Ratio desc
+    df = df.sort_values(by=["RS-Momentum", "RS-Ratio"], ascending=[False, False]).reset_index(drop=True)
     df.insert(0, "S.No", np.arange(1, len(df) + 1))
     df["Position"] = df["S.No"]
 
@@ -339,68 +427,73 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
              "Final_Rank", "Position", "Chart", "Symbol"]
     return df[order]
 
-def style_rows(df: pd.DataFrame):
+def style_rows(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     """
-    Institutional row styling + alignment + HTML links (Pandas 2.2+ safe).
+    Row banding + alignment + Performance color mapping (per spec).
     """
+    # soft row banding by S.No
     def _row_style(r: pd.Series):
         bg = row_bg_for_serial(int(r["S.No"]))
-      
-      
         return [f"background-color: {bg}"] * len(df.columns)
 
     styler = df.style.apply(lambda rr: _row_style(rr), axis=1)
+    styler = styler.format(escape=None)
 
-  
+    # Alignment
     text_cols = ["Name", "Industry"]
     num_cols = [c for c in df.columns if c not in text_cols]
-
-    
-  
-    styler = styler.format(escape=None)
-    
-  
-    styler = styler.format({"Name": lambda v: v})
-
- 
-  
-    th_styles = [{"selector": f"th.col{i}", "props": f'data-col: {"Name" if col=="Name" else ("Industry" if col=="Industry" else "num")};'} 
-                 for i, col in enumerate(df.columns)]
-
-  
-    base_styles = [
-        {"selector": "table", "props": "border-collapse: collapse;"},
-    ]
-
-    styler = styler.set_table_styles(base_styles + th_styles)
-
-   
-  
     styler = styler.set_properties(subset=text_cols, **{"text-align": "left"})
     styler = styler.set_properties(subset=num_cols, **{"text-align": "right", "font-variant-numeric": "tabular-nums"})
 
-    # Hide index if available
-    try: styler = styler.hide(axis="index")
-    except Exception: pass
+    # Header alignment via nth-child rules + base styles
+    th_rules = []
+    for i, col in enumerate(df.columns, start=1):
+        align = "left" if col in text_cols else "right"
+        th_rules.append({"selector": f"thead th:nth-child({i})", "props": f"text-align: {align};"})
+    base_rules = [{"selector": "table", "props": "border-collapse: collapse;"}]
+    styler = styler.set_table_styles(base_rules + th_rules)
 
+    # ---- Performance color mapping (exact hues per request) ----
+    perf_color_map = {
+        "Leading":   "var(--perf-leading)",
+        "Improving": "var(--perf-improving)",
+        "Lagging":   "var(--perf-lagging)",
+        "Weakening": "var(--perf-weakening)",
+    }
+    perf_colors = df["Performance"].map(lambda v: perf_color_map.get(str(v), "transparent"))
+    perf_styles = pd.DataFrame("", index=df.index, columns=df.columns)
+    perf_styles.loc[:, "Performance"] = perf_colors.map(lambda c: f"background-color: {c}; font-weight: 700;")
+    styler = styler.set_td_classes(pd.DataFrame("", index=df.index, columns=df.columns))
+    styler = styler.set_properties(**{}).apply(lambda _: perf_styles, axis=None)
+
+    # Hide index
+    try:
+        styler = styler.hide(axis="index")
+    except Exception:
+        try:
+            styler = styler.hide_index()
+        except Exception:
+            pass
     return styler
 
-
-
+# =========================================================
+# Controls
+# =========================================================
 st.sidebar.header("Controls")
-indices_universe = st.sidebar.selectbox("Indices Universe", list(CSV_FILES.keys()), index=0)  # Nifty 200
-benchmark_key    = st.sidebar.selectbox("Benchmark", list(BENCHMARKS.keys()), index=2)        # Nifty 500
-timeframe        = st.sidebar.selectbox("Timeframe (EOD only)", ["1d"], index=0)              # locked to 1d
-period           = st.sidebar.selectbox("Period", ["1y", "2y", "3y", "5y"], index=1)          # default 2y
+indices_universe = st.sidebar.selectbox("Indices Universe", list(CSV_FILES.keys()), index=0)   # Nifty 200
+benchmark_key    = st.sidebar.selectbox("Benchmark", list(BENCHMARKS.keys()), index=2)         # Nifty 500
+timeframe        = st.sidebar.selectbox("Timeframe (EOD only)", ["1d"], index=0)
+period           = st.sidebar.selectbox("Period", ["1y", "2y", "3y", "5y"], index=1)
+top_n            = st.sidebar.slider("Show Top N", min_value=10, max_value=100, value=30, step=10)
 do_load          = st.sidebar.button("Load / Refresh", use_container_width=True)
 
-
-
 if "ran_once" not in st.session_state:
-  st.session_state.ran_once = True
-  do_load = True
+    st.session_state.ran_once = True
+    do_load = True
 
-# -------------------- ACTION --------------------
+# =========================================================
+# Action
+# =========================================================
 if do_load:
     try:
         uni_url = CSV_FILES[indices_universe]
@@ -417,15 +510,14 @@ if do_load:
 
         df = build_table_dataframe(raw, benchmark, universe_df)
 
-      
-      
+        # Build UI table (sorted already by RS-Momentum, RS-Ratio desc)
         ui_cols = [
             "S.No", "Name", "Industry",
             "Return_6M", "Rank_6M",
             "Return_3M", "Rank_3M",
             "Return_1M", "Rank_1M",
             "RS-Ratio", "RS-Momentum", "Performance",
-            "Final_Rank", "Position", "Chart"
+            "Position", "Chart"
         ]
         display_df = df[ui_cols].copy()
         display_df["Name"] = display_df.apply(
@@ -434,17 +526,16 @@ if do_load:
         )
         display_df = display_df.drop(columns=["Chart"])
 
-        st.subheader("Alpha Momentum 30")
-
        
-      
+
+        # Show only top N rows
+        display_df = display_df.head(top_n)
         table_html = style_rows(display_df).to_html()
         st.markdown(f'<div class="pro-card">{table_html}</div>', unsafe_allow_html=True)
 
-        st.caption(f"{len(df)} results • {indices_universe} • {benchmark_key} • 1d EOD • {period}")
+        st.caption(f"{len(df)} results in universe • {indices_universe} • {benchmark_key} • 1d EOD • {period}")
 
-      
-      
+        # Export CSV (without Symbol per your earlier preference)
         csv_bytes = df.drop(columns=["Symbol"]).to_csv(index=False).encode("utf-8")
         st.download_button(
             "Export CSV",
