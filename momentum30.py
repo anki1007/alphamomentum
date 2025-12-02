@@ -33,7 +33,7 @@ html, body, .stApp {
   font-family: var(--app-font) !important;
 }
 
-.block-container { padding-top: 2.0rem; }
+.block-container { padding-top: 3.75rem; }  /* increased so title isn't clipped */
 
 /* Hero title (subtle, institutional) */
 .hero-title {
@@ -316,20 +316,22 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
         raise RuntimeError("No tickers passed the filters. Try a longer Period (e.g., 3y) with 1d timeframe.")
     df = pd.DataFrame(rows)
 
-    # Round + ranks
-    for c in ("Return_6M", "Return_3M", "Return_1M"):
-        df[c] = pd.to_numeric(df[c], errors="coerce").round(1)
-    df["RS-Ratio"] = pd.to_numeric(df["RS-Ratio"], errors="coerce").round(2)
-    df["RS-Momentum"] = pd.to_numeric(df["RS-Momentum"], errors="coerce").round(2)
+    # --- Round & enforce types ---
+    # Returns & JDK: 2 decimals
+    for c in ("Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum"):
+        df[c] = pd.to_numeric(df[c], errors="coerce").round(2)
 
-    df["Rank_6M"] = df["Return_6M"].rank(ascending=False, method="min")
-    df["Rank_3M"] = df["Return_3M"].rank(ascending=False, method="min")
-    df["Rank_1M"] = df["Return_1M"].rank(ascending=False, method="min")
-    df["Final_Rank"] = df["Rank_6M"] + df["Rank_3M"] + df["Rank_1M"]
+    # Ranks as integers
+    df["Rank_6M"] = df["Return_6M"].rank(ascending=False, method="min").astype("Int64")
+    df["Rank_3M"] = df["Return_3M"].rank(ascending=False, method="min").astype("Int64")
+    df["Rank_1M"] = df["Return_1M"].rank(ascending=False, method="min").astype("Int64")
+
+    # Final Rank (integer) and S.No / Position (integers)
+    df["Final_Rank"] = (df["Rank_6M"].fillna(0) + df["Rank_3M"].fillna(0) + df["Rank_1M"].fillna(0)).astype("Int64")
 
     df = df.sort_values("Final_Rank", kind="mergesort").reset_index(drop=True)
-    df.insert(0, "S.No", np.arange(1, len(df) + 1))
-    df["Position"] = df["S.No"]
+    df.insert(0, "S.No", np.arange(1, len(df) + 1, dtype=int))
+    df["Position"] = df["S.No"].astype(int)
 
     order = ["S.No", "Name", "Industry",
              "Return_6M", "Rank_6M",
@@ -341,41 +343,45 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
 
 def style_rows(df: pd.DataFrame):
     """
-    Institutional row styling + alignment + HTML links (Pandas 2.2+ safe).
+    Institutional row styling + alignment + HTML links (Pandas 2.2+ safe),
+    with number formatting rules:
+      - 2 decimals for numeric metrics (returns & JDK)
+      - integers for S.No, ranks, Final_Rank, Position
     """
     def _row_style(r: pd.Series):
         bg = row_bg_for_serial(int(r["S.No"]))
-      
-      
         return [f"background-color: {bg}"] * len(df.columns)
 
     styler = df.style.apply(lambda rr: _row_style(rr), axis=1)
 
-  
-    text_cols = ["Name", "Industry"]
-    num_cols = [c for c in df.columns if c not in text_cols]
+    text_cols = ["Name", "Industry", "Performance"]
+    # Numeric columns that should be integers in display
+    int_cols = ["S.No", "Rank_6M", "Rank_3M", "Rank_1M", "Final_Rank", "Position"]
+    # Numeric columns that should be 2-decimals
+    two_dec_cols = ["Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum"]
 
-    
-  
-    styler = styler.format(escape=None)
-    
-  
+    # Build formatters
+    fmt = {c: "{:,.2f}".format for c in two_dec_cols}
+    fmt.update({c: "{:d}".format for c in int_cols})
+
+    # Apply formatting
+    styler = styler.format(fmt, na_rep="-", escape=None)
+
+    # Render Name as-is (already html-linked in display_df)
     styler = styler.format({"Name": lambda v: v})
 
- 
-  
-    th_styles = [{"selector": f"th.col{i}", "props": f'data-col: {"Name" if col=="Name" else ("Industry" if col=="Industry" else "num")};'} 
+    # Column header data-col hints for CSS alignment
+    th_styles = [{"selector": f"th.col{i}", "props": f'data-col: {"Name" if col=="Name" else ("Industry" if col=="Industry" else ("num" if col not in ["Performance"] else "Name"))};'}
                  for i, col in enumerate(df.columns)]
 
-  
     base_styles = [
         {"selector": "table", "props": "border-collapse: collapse;"},
     ]
 
     styler = styler.set_table_styles(base_styles + th_styles)
 
-   
-  
+    # Alignments
+    num_cols = [c for c in df.columns if c not in text_cols]
     styler = styler.set_properties(subset=text_cols, **{"text-align": "left"})
     styler = styler.set_properties(subset=num_cols, **{"text-align": "right", "font-variant-numeric": "tabular-nums"})
 
@@ -386,7 +392,6 @@ def style_rows(df: pd.DataFrame):
     return styler
 
 
-
 st.sidebar.header("Controls")
 indices_universe = st.sidebar.selectbox("Indices Universe", list(CSV_FILES.keys()), index=0)  # Nifty 200
 benchmark_key    = st.sidebar.selectbox("Benchmark", list(BENCHMARKS.keys()), index=2)        # Nifty 500
@@ -394,11 +399,9 @@ timeframe        = st.sidebar.selectbox("Timeframe (EOD only)", ["1d"], index=0)
 period           = st.sidebar.selectbox("Period", ["1y", "2y", "3y", "5y"], index=1)          # default 2y
 do_load          = st.sidebar.button("Load / Refresh", use_container_width=True)
 
-
-
 if "ran_once" not in st.session_state:
-  st.session_state.ran_once = True
-  do_load = True
+    st.session_state.ran_once = True
+    do_load = True
 
 # -------------------- ACTION --------------------
 if do_load:
@@ -417,8 +420,6 @@ if do_load:
 
         df = build_table_dataframe(raw, benchmark, universe_df)
 
-      
-      
         ui_cols = [
             "S.No", "Name", "Industry",
             "Return_6M", "Rank_6M",
@@ -436,16 +437,21 @@ if do_load:
 
         st.subheader("Alpha Momentum 30")
 
-       
-      
         table_html = style_rows(display_df).to_html()
         st.markdown(f'<div class="pro-card">{table_html}</div>', unsafe_allow_html=True)
 
         st.caption(f"{len(df)} results • {indices_universe} • {benchmark_key} • 1d EOD • {period}")
 
-      
-      
-        csv_bytes = df.drop(columns=["Symbol"]).to_csv(index=False).encode("utf-8")
+        # --- CSV export ---
+        # Ensure exported numeric formatting: 2 decimals for metric columns, ints for rank/position
+        export_df = df.drop(columns=["Symbol"]).copy()
+        # enforce dtypes/rounding for export as well
+        for c in ("Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum"):
+            export_df[c] = pd.to_numeric(export_df[c], errors="coerce").round(2)
+        for c in ("S.No", "Rank_6M", "Rank_3M", "Rank_1M", "Final_Rank", "Position"):
+            export_df[c] = pd.to_numeric(export_df[c], errors="coerce").astype("Int64")
+
+        csv_bytes = export_df.to_csv(index=False).encode("utf-8")
         st.download_button(
             "Export CSV",
             data=csv_bytes,
@@ -456,4 +462,3 @@ if do_load:
 
     except Exception as e:
         st.error(str(e))
-
