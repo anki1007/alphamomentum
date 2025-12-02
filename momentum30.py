@@ -1,10 +1,3 @@
-# streamlit_app.py
-# Momentum Screener (Streamlit)
-# - Loads index universes from your GitHub CSVs
-# - Benchmarks unchanged
-# - Left sidebar controls: Indices Universe, Benchmark, Timeframe, Period, Load/Refresh
-# - Produces ranked momentum table with TradingView links + CSV export
-
 import os
 import pandas as pd
 import numpy as np
@@ -22,7 +15,7 @@ BENCHMARKS = {
 }
 
 # Universes hosted on your GitHub
-GITHUB_BASE = "https://raw.githubusercontent.com/anki1007/rrg-stocks/main/ticker/"
+GITHUB_BASE = "https://raw.githubusercontent.com/anki1007/alphamomentum/main/"
 CSV_FILES = {
     "Nifty 200":           GITHUB_BASE + "nifty200.csv",
     "Nifty 500":           GITHUB_BASE + "nifty500.csv",
@@ -322,3 +315,4 @@ if do_load:
 
     except Exception as e:
         st.error(str(e))
+
