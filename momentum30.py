@@ -1,4 +1,3 @@
-# momentum30.py
 from __future__ import annotations
 
 import numpy as np
@@ -12,7 +11,6 @@ st.set_page_config(page_title="Alpha Momentum Screener", layout="wide")
 
 st.markdown("""
 <style>
-/* -------- Bloomberg Dark Institutional Theme -------- */
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap');
 
 :root {
@@ -49,29 +47,40 @@ html, body, .stApp {
   letter-spacing: .2px;
 }
 
-/* Sidebar */
+/* ---------- Sidebar (strong overrides) ---------- */
 section[data-testid="stSidebar"] {
   background: var(--bg-2) !important;
   border-right: 1px solid var(--border);
 }
 section[data-testid="stSidebar"] * { color: var(--text) !important; }
-section[data-testid="stSidebar"] label { font-weight: 800; color: var(--text-dim) !important; letter-spacing:.2px; }
-section[data-testid="stSidebar"] .stSelectbox > div { border-radius: 12px; }
-section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
-  min-height: 42px; font-size: 0.98rem; font-weight: 700; padding-left: 6px;
+
+/* Labels */
+section[data-testid="stSidebar"] label {
+  font-weight: 900 !important;
+  font-size: 0.95rem !important;
+  letter-spacing: .2px !important;
+  color: var(--text-dim) !important;
 }
-section[data-testid="stSidebar"] .stSelectbox label { font-size: 0.92rem; }
+
+/* Selectboxes (BaseWeb combobox) */
+section[data-testid="stSidebar"] .stSelectbox div[role="combobox"] {
+  min-height: 44px !important;
+  border-radius: 12px !important;
+  font-size: 1rem !important;
+  font-weight: 800 !important;
+  padding-left: 6px !important;
+}
 
 /* Buttons */
-.stButton button {
-  background: linear-gradient(180deg, #1b2432, #131922);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  font-weight: 800;
-  font-size: 0.98rem;
+section[data-testid="stSidebar"] .stButton button {
+  background: linear-gradient(180deg, #1b2432, #131922) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+  font-weight: 900 !important;
+  font-size: 1rem !important;
 }
-.stButton button:hover { filter: brightness(1.06); }
+section[data-testid="stSidebar"] .stButton button:hover { filter: brightness(1.06); }
 
 /* Card wrapper for table */
 .pro-card {
@@ -162,7 +171,7 @@ def perf_quadrant(x: float, y: float) -> str:
 def analyze_momentum(adj: pd.Series) -> dict | None:
     if adj is None or adj.empty or len(adj) < 252:
         return None
-    ema100 = adj.ewm(span=100, adjust=False).mean()
+    ema100 = adj.ewm(span=100, adjust=False).mean()252
     try:
         one_year_return = (adj.iloc[-1] / adj.iloc[-252] - 1.0) * 100.0
     except Exception:
@@ -305,10 +314,9 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
              "Final_Rank", "Position", "Chart", "Symbol"]
     return df[order]
 
-# ---------- Styler with internal CSS & formatting (works in Streamlit sandbox) ----------
+# ---------- Styler with internal CSS & alignment ----------
 def style_rows(df: pd.DataFrame):
     """
-    - Applies 2 decimals for metrics; integers for ranks/position
     - Font & sizing injected INSIDE the Styler (so it takes effect)
     - Row banding; alignment; hyperlink preserved
     """
@@ -318,18 +326,10 @@ def style_rows(df: pd.DataFrame):
 
     styler = df.style.apply(_row_style, axis=1)
 
-    # Format numbers
-    two_dec_cols = ["Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum"]
-    int_cols     = ["S.No", "Rank_6M", "Rank_3M", "Rank_1M", "Final_Rank", "Position"]
-    for c in two_dec_cols:
-        styler = styler.format({c: (lambda v: "" if pd.isna(v) else f"{float(v):.2f}")})
-    for c in int_cols:
-        styler = styler.format({c: (lambda v: "" if pd.isna(v) else f"{int(round(float(v)))}")})
-
     # Allow HTML for Name + disable escaping
     styler = styler.format(escape=None).format({"Name": lambda v: v})
 
-    # Internal table CSS (font size/family + compact paddings)
+    # Internal table CSS (font size/family + compact paddings + sticky header color)
     styler = styler.set_table_styles([
         {"selector": "table", "props":
             "font-size:0.86rem; font-family:'Plus Jakarta Sans',system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;"
@@ -379,7 +379,7 @@ if load_clicked:
 
         df = build_table_dataframe(raw, benchmark, universe_df)
 
-        # Build UI table: hyperlink on Name; hide Chart
+        # Build UI table (hyperlink on Name; hide Chart)
         ui_cols = [
             "S.No", "Name", "Industry",
             "Return_6M", "Rank_6M",
@@ -395,7 +395,19 @@ if load_clicked:
         )
         display_df = display_df.drop(columns=["Chart"])
 
-        st.subheader("Screened Momentum Table")
+        # === Format numbers BEFORE styling (ensures 2 decimals / integers in output) ===
+        two_dec_cols = ["Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum"]
+        int_cols     = ["S.No", "Rank_6M", "Rank_3M", "Rank_1M", "Final_Rank", "Position"]
+
+        for c in two_dec_cols:
+            if c in display_df.columns:
+                display_df[c] = display_df[c].apply(lambda v: "" if pd.isna(v) else f"{float(v):.2f}")
+
+        for c in int_cols:
+            if c in display_df.columns:
+                display_df[c] = display_df[c].apply(lambda v: "" if pd.isna(v) else f"{int(round(float(v)))}")
+
+        st.subheader("Alpha Momentum 30")
         table_html = style_rows(display_df).to_html()
         st.markdown(f'<div class="pro-card">{table_html}</div>', unsafe_allow_html=True)
 
