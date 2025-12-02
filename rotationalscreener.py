@@ -12,10 +12,10 @@ from typing import List, Dict
 st.set_page_config(page_title="Rotational Momentum Screener", layout="wide")
 
 # =========================================================
-# THEME SYSTEM (Bloomberg-style + variants)
+# THEME
 # =========================================================
 THEMES = {
-    "Bloomberg Dark": {
+    "Dark": {
         "import_font": """
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap');
         """,
@@ -42,7 +42,7 @@ THEMES = {
             "--band-rest": "rgba(231, 76, 60, 0.12)",
         },
     },
-    "Bloomberg Light": {
+    "Light": {
         "import_font": """
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap');
         """,
@@ -67,7 +67,7 @@ THEMES = {
             "--band-rest": "rgba(231, 76, 60, 0.10)",
         },
     },
-    "Terminal Dark": {
+    "Dark": {
         "import_font": """
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap');
         """,
@@ -195,7 +195,7 @@ st.sidebar.header("Appearance")
 theme_choice = st.sidebar.selectbox("Theme", list(THEMES.keys()), index=0)
 render_theme_css(theme_choice)
 
-st.markdown('<div class="hero-title">Alpha Momentum Screener</div>', unsafe_allow_html=True)
+st.markdown('<div class="hero-title">Rotational Momentum Screener</div>', unsafe_allow_html=True)
 
 # =========================================================
 # DATA / CONFIG
@@ -414,7 +414,7 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
     df["Rank_1M"] = df["Return_1M"].rank(ascending=False, method="min")
     df["Final_Rank"] = df["Rank_6M"] + df["Rank_3M"] + df["Rank_1M"]
 
-    # >>> Bloomberg-style order: RS-Momentum desc, then RS-Ratio desc
+   
     df = df.sort_values(by=["RS-Momentum", "RS-Ratio"], ascending=[False, False]).reset_index(drop=True)
     df.insert(0, "S.No", np.arange(1, len(df) + 1))
     df["Position"] = df["S.No"]
@@ -547,6 +547,7 @@ if do_load:
 
     except Exception as e:
         st.error(str(e))
+
 
 
 
