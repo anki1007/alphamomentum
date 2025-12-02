@@ -32,10 +32,6 @@ a { text-decoration: none; color: #9ecbff; } a:hover { text-decoration: underlin
 table { border-collapse: collapse; font-size: 0.86rem; width: 100%; color: var(--text); }
 thead th { position: sticky; top: 0; z-index: 2; background: #121823; color: var(--text-dim); border-bottom: 1px solid var(--border); padding: 6px 8px; white-space: nowrap; }
 tbody td { padding: 6px 8px; border-top: 1px solid var(--border-soft); white-space: nowrap; }
-td[data-col="Name"], th[data-col="Name"],
-td[data-col="Industry"], th[data-col="Industry"] { text-align: left; }
-td[data-col="num"], th[data-col="num"] { text-align: right; font-variant-numeric: tabular-nums; }
-tbody tr:hover td { background: rgba(255,255,255,0.02) !important; }
 h2, .stMarkdown h2 { color: var(--text); }
 </style>
 """, unsafe_allow_html=True)
@@ -193,8 +189,8 @@ def row_bg_for_serial(sno: int) -> str:
 
 def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.DataFrame) -> pd.DataFrame:
     bench = _pick_close(raw, benchmark).dropna()
-    if bench.empty:
-        raise RuntimeError(f"Benchmark {benchmark} series empty.")
+    if bench.empty: raise RuntimeError(f"Benchmark {benchmark} series empty.")
+
     cutoff = bench.index.max() - pd.Timedelta(days=RS_LOOKBACK_DAYS + 5)
     bench_rs = bench.loc[bench.index >= cutoff].copy()
 
@@ -202,14 +198,13 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
     for _, rec in universe_df.iterrows():
         sym, name, industry = rec.Symbol, rec.Name, rec.Industry
         s = _pick_close(raw, sym).dropna()
-        if s.empty:
-            continue
-        if analyze_momentum(s) is None:
-            continue
+        if s.empty: continue
+        if analyze_momentum(s) is None: continue
+
         s_rs = s.loc[s.index >= cutoff].copy()
         rr, mm = jdk_components(s_rs, bench_rs)
-        if rr.empty or mm.empty:
-            continue
+        if rr.empty or mm.empty: continue
+
         ix = rr.index.intersection(mm.index)
         rows.append({
             "Name": name,
@@ -226,14 +221,16 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
             "Symbol": sym,
             "Chart": tradingview_chart_url(sym),
         })
+
     if not rows:
         raise RuntimeError("No tickers passed the filters. Try a longer Period (e.g., 3y) with 1d timeframe.")
     df = pd.DataFrame(rows)
 
-    # Round numerics
+    # round numerics
     for c in ("Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum"):
         df[c] = pd.to_numeric(df[c], errors="coerce").round(2)
 
+    # ranks as ints
     df["Rank_6M"] = df["Return_6M"].rank(ascending=False, method="min").astype("Int64")
     df["Rank_3M"] = df["Return_3M"].rank(ascending=False, method="min").astype("Int64")
     df["Rank_1M"] = df["Return_1M"].rank(ascending=False, method="min").astype("Int64")
@@ -257,18 +254,12 @@ def style_rows(df: pd.DataFrame):
         return [f"background-color: {bg}"] * len(df.columns)
     styler = df.style.apply(lambda rr: _row_style(rr), axis=1)
 
-    # header data-col hints for CSS alignment
-    th_styles = [
-        {"selector": f"th.col{i}",
-         "props": f'data-col: {"Name" if col in ["Name","Performance"] else ("Industry" if col=="Industry" else "num")};'}
-        for i, col in enumerate(df.columns)
-    ]
-    styler = styler.set_table_styles([{"selector": "table", "props": "border-collapse: collapse;"}] + th_styles)
+    # Center all except Name & Industry
+    text_cols = ["Name", "Industry"]
+    center_cols = [c for c in df.columns if c not in text_cols]
 
-    # align using CSS (strings will still align right because of data-col="num")
-    num_cols = [c for c in df.columns if c not in ["Name","Industry","Performance"]]
-    styler = styler.set_properties(subset=["Name","Industry","Performance"], **{"text-align": "left"})
-    styler = styler.set_properties(subset=num_cols, **{"text-align": "right", "font-variant-numeric": "tabular-nums"})
+    styler = styler.set_properties(subset=text_cols, **{"text-align": "left"})
+    styler = styler.set_properties(subset=center_cols, **{"text-align": "center", "font-variant-numeric": "tabular-nums"})
 
     try: styler = styler.hide(axis="index")
     except Exception: pass
@@ -296,8 +287,7 @@ if do_load:
 
         with st.spinner("Fetching EOD prices…"):
             raw = fetch_prices(tickers, benchmark, period=period, interval="1d")
-        if raw.empty:
-            st.stop()
+        if raw.empty: st.stop()
 
         df = build_table_dataframe(raw, benchmark, universe_df)
 
@@ -310,31 +300,33 @@ if do_load:
             "Final_Rank", "Position", "Chart"
         ]
         display_df = df[ui_cols].copy()
-        # Make Name an external link
+
+        # Link the Name column
         display_df["Name"] = display_df.apply(
             lambda r: f'<a href="{r["Chart"]}" target="_blank" rel="noopener noreferrer">{r["Name"]}</a>',
             axis=1
         )
         display_df = display_df.drop(columns=["Chart"])
 
-        # --------- FORCE FORMATTING BEFORE STYLING ----------
-        int_cols = ["S.No", "Rank_6M", "Rank_3M", "Rank_1M", "Final_Rank", "Position"]
+        # --------- Rename Final_Rank -> Final Rank (fix split) ----------
+        display_df = display_df.rename(columns={"Final_Rank": "Final Rank"})
+
+        # --------- Force formatting for visible table ----------
+        int_cols = ["S.No", "Rank_6M", "Rank_3M", "Rank_1M", "Final Rank", "Position"]
         two_dec_cols = ["Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum"]
 
         for c in int_cols:
             display_df[c] = display_df[c].map(lambda v: "-" if pd.isna(v) else f"{int(v)}")
-
         for c in two_dec_cols:
             display_df[c] = display_df[c].map(lambda v: "-" if pd.isna(v) else f"{float(v):.2f}")
 
         st.subheader("Alpha Momentum 30")
-
         table_html = style_rows(display_df).to_html()
         st.markdown(f'<div class="pro-card">{table_html}</div>', unsafe_allow_html=True)
 
         st.caption(f"{len(df)} results • {indices_universe} • {benchmark_key} • 1d EOD • {period}")
 
-        # CSV export: keep numeric types, not strings
+        # CSV export (keep numeric types & original column name)
         export_df = df.drop(columns=["Symbol"]).copy()
         for c in ("Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum"):
             export_df[c] = pd.to_numeric(export_df[c], errors="coerce").round(2)
