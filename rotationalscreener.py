@@ -468,7 +468,7 @@ st.sidebar.header("Controls")
 indices_universe = st.sidebar.selectbox("Indices Universe", list(CSV_FILES.keys()), index=0)
 benchmark_key    = st.sidebar.selectbox("Benchmark", list(BENCHMARKS.keys()), index=2)
 timeframe        = st.sidebar.selectbox("Timeframe (EOD only)", ["1d"], index=0)
-period           = st.sidebar.selectbox("Period", ["1y", "2y", "3y", "5y"], index=1)
+period           = st.sidebar.selectbox("Period", ["2y", "3y", "5y"], index=1)
 do_load          = st.sidebar.button("Load / Refresh", use_container_width=True)
 
 if "ran_once" not in st.session_state:
@@ -526,4 +526,5 @@ if do_load:
 
     except Exception as e:
         st.error(str(e))
+
 
