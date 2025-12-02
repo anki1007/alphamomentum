@@ -1,13 +1,16 @@
-streamlit
-pandas
-numpy
+streamlit==1.51.0
+pandas==2.3.3
+numpy==2.3.5
+yfinance==0.2.66
+matplotlib==3.10.0
+requests==2.32.3
+plotly==6.5.0
+beautifulsoup4==4.12.3
+openpyxl==3.1.5
 python-dateutil==2.9.0.post0
 tzdata
-yfinance
 multitasking
 requests
-matplotlib
-plotly
 mplcursors
 pillow
 openpyxl
@@ -17,4 +20,3 @@ altair
 protobuf
 watchdog
 streamlit-autorefresh
-requests
