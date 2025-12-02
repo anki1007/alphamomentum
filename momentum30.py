@@ -22,7 +22,7 @@ html, body, [class*="css"], .stMarkdown, .stText, .stSelectbox, .stButton, .stDa
 
 /* Hero title */
 .hero-title {
-  font-weight: 800; font-size: clamp(28px, 5vw, 36px); line-height: 1.1;
+  font-weight: 800; font-size: clamp(28px, 5vw, 48px); line-height: 1.1;
   margin: 6px 0 12px 0;
   background: linear-gradient(90deg, #2bb0ff, #7a5cff 45%, #ff6cab 90%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
@@ -52,6 +52,7 @@ BENCHMARKS: Dict[str, str] = {
     "Nifty Midcap 150": "^NIFTYMIDCAP150.NS",
     "Nifty Smallcap 250": "^NIFTYSMLCAP250.NS",
 }
+
 GITHUB_BASE = "https://raw.githubusercontent.com/anki1007/alphamomentum/main/"
 CSV_FILES: Dict[str, str] = {
     "Nifty 200":           GITHUB_BASE + "nifty200.csv",      # default universe
@@ -61,6 +62,7 @@ CSV_FILES: Dict[str, str] = {
     "Nifty Smallcap 250":  GITHUB_BASE + "niftysmallcap250.csv",
     "Nifty Total Market":  GITHUB_BASE + "niftytotalmarket.csv",
 }
+
 RS_LOOKBACK_DAYS = 252
 JDK_WINDOW = 21
 
@@ -164,22 +166,23 @@ def load_universe_from_csv(url: str) -> pd.DataFrame:
 def _period_years_to_dates(period: str) -> tuple[pd.Timestamp, pd.Timestamp]:
     """
     Convert '1y'/'2y'/'3y'/'5y' to explicit (start, end) dates anchored to 'today' IST.
-    yfinance's 'end' is exclusive, so we return end = today + 1 day to include today.
+    yfinance 'end' is exclusive, so end = today + 1 day to include today's EOD when available.
     """
-    years_map = {"2y": 2, "3y": 3, "5y": 5}
-    years = years_map.get(period, 1)
-    # Anchor to India time
+    years_map = {"1y": 1, "2y": 2, "3y": 3, "5y": 5}
+    years = years_map.get(period, 2)  # default 2y as requested
     today_ist = pd.Timestamp.now(tz="Asia/Kolkata").normalize()
-    end = today_ist + pd.Timedelta(days=1)  # exclusive upper bound to include 'today'
+    end = today_ist + pd.Timedelta(days=1)  # exclusive
     start = today_ist - pd.DateOffset(years=years)
-    # yfinance accepts tz-naive; we'll pass dates only
     return start, end
 
 @st.cache_data(show_spinner=True)
-def fetch_prices(tickers: List[str], benchmark: str, period: str, interval: str) -> pd.DataFrame:
+def fetch_prices(tickers: List[str], benchmark: str, period: str, interval: str = "1d") -> pd.DataFrame:
     """
-    Robust downloader fetching from explicit [start, end) so the latest date is today.
+    EOD-only downloader fetching from explicit [start, end) so the latest date is today.
     """
+    # Force EOD only
+    interval = "1d"
+
     start, end = _period_years_to_dates(period)
     try:
         data = yf.download(
@@ -195,7 +198,7 @@ def fetch_prices(tickers: List[str], benchmark: str, period: str, interval: str)
     except Exception as e:
         msg = str(e)
         if "Rate limited" in msg or "Too Many Requests" in msg:
-            st.warning("Yahoo Finance rate limited the request. Please try again in ~1–2 minutes.")
+            st.warning("Yahoo Finance rate limited the request. Please try again shortly.")
         else:
             st.error(f"Data download failed: {e}")
         return pd.DataFrame()
@@ -253,7 +256,7 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
         })
 
     if not rows:
-        raise RuntimeError("No tickers passed the filters. Try a longer Period and Timeframe=1d.")
+        raise RuntimeError("No tickers passed the filters. Try a longer Period (e.g., 3y) with 1d timeframe.")
     df = pd.DataFrame(rows)
 
     # Round and ranks
@@ -293,13 +296,15 @@ def style_rows(df: pd.DataFrame):
 
 # -------------------- SIDEBAR (DEFAULTS) --------------------
 st.sidebar.header("Controls")
-# Defaults: Benchmark = "Nifty 500", Universe = "Nifty 200", Timeframe = "1d", Period = "1y"
+# Defaults requested: Benchmark = "Nifty 500", Universe = "Nifty 200", Timeframe = EOD only (1d), Period = "2y"
 indices_universe = st.sidebar.selectbox("Indices Universe", list(CSV_FILES.keys()), index=0)  # "Nifty 200"
 benchmark_key    = st.sidebar.selectbox("Benchmark", list(BENCHMARKS.keys()), index=2)        # "Nifty 500"
-timeframe        = st.sidebar.selectbox("Timeframe", ["1d", "1wk", "1mo"], index=0)           # "1d"
-period           = st.sidebar.selectbox("Period", ["1y", "2y", "3y", "5y"], index=0)          # "1y"
+# EOD only -> lock timeframe to 1d
+timeframe        = st.sidebar.selectbox("Timeframe (EOD only)", ["1d"], index=0)
+period           = st.sidebar.selectbox("Period", ["1y", "2y", "3y", "5y"], index=1)          # default "2y"
 do_load          = st.sidebar.button("Load / Refresh", use_container_width=True)
 
+# Auto-run on first visit
 if "ran_once" not in st.session_state:
     st.session_state.ran_once = True
     do_load = True
@@ -313,8 +318,8 @@ if do_load:
         benchmark = BENCHMARKS[benchmark_key]
         tickers = universe_df["Symbol"].tolist()
 
-        with st.spinner("Fetching prices…"):
-            raw = fetch_prices(tickers, benchmark, period=period, interval=timeframe)
+        with st.spinner("Fetching EOD prices…"):
+            raw = fetch_prices(tickers, benchmark, period=period, interval="1d")
 
         if raw.empty:
             st.stop()
@@ -337,9 +342,9 @@ if do_load:
         st.subheader("Screened Momentum Table")
         st.markdown(style_rows(display_df).to_html(), unsafe_allow_html=True)
 
-        st.caption(f"{len(df)} results • {indices_universe} • {benchmark_key} • {timeframe} • {period}")
+        st.caption(f"{len(df)} results • {indices_universe} • {benchmark_key} • 1d EOD • {period}")
 
-        # Export (hide Symbol in export to match UI; change if you prefer keeping it)
+        # Export (Symbol hidden in export to match UI; change if you prefer keeping it)
         csv_bytes = df.drop(columns=["Symbol"]).to_csv(index=False).encode("utf-8")
         st.download_button("Export CSV", csv_bytes,
                            file_name=f"{indices_universe.replace(' ', '').lower()}_momentum.csv",
