@@ -282,13 +282,13 @@ def analyze_momentum(adj: pd.Series) -> dict | None:
     except Exception:
         return None
     high_52w = adj.iloc[-252:].max()
-    within_30pct_high = adj.iloc[-1] >= high_52w * 0.8
+    within_40pct_high = adj.iloc[-1] >= high_52w * 0.8
     if len(adj) < 126:
         return None
     six_month = adj.iloc[-126:]
     up_days_pct = (six_month.pct_change() > 0).sum() / len(six_month) * 100.0
     if (adj.iloc[-1] >= ema100.iloc[-1] and one_year_return >= 6.5 and
-        within_30pct_high and up_days_pct > 30.0):
+        within_40pct_high and up_days_pct > 30.0):
         try:
             r6 = (adj.iloc[-1] / adj.iloc[-126] - 1.0) * 100.0
             r3 = (adj.iloc[-1] / adj.iloc[-63]  - 1.0) * 100.0
@@ -547,5 +547,6 @@ if do_load:
 
     except Exception as e:
         st.error(str(e))
+
 
 
