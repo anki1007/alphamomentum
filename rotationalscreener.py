@@ -30,12 +30,10 @@ THEMES = {
             "--text-dim": "#9eabbc",
             "--accent": "#00c3ff",
             "--accent-2": "#ffb300",
-            # Performance colors (fixed per spec)
-            "--perf-leading": "rgba(46, 204, 113, 0.25)",   # green
-            "--perf-improving": "rgba(52, 152, 219, 0.25)", # blue
-            "--perf-lagging": "rgba(231, 76, 60, 0.25)",    # red
-            "--perf-weakening": "rgba(255, 204, 0, 0.30)",  # yellow
-            # Row banding
+            "--perf-leading": "rgba(46, 204, 113, 0.25)",
+            "--perf-improving": "rgba(52, 152, 219, 0.25)",
+            "--perf-lagging": "rgba(231, 76, 60, 0.25)",
+            "--perf-weakening": "rgba(255, 204, 0, 0.30)",
             "--band-top": "rgba(46, 204, 113, 0.12)",
             "--band-mid1": "rgba(255, 204, 0, 0.12)",
             "--band-mid2": "rgba(52, 152, 219, 0.12)",
@@ -67,7 +65,8 @@ THEMES = {
             "--band-rest": "rgba(231, 76, 60, 0.10)",
         },
     },
-    "Dark": {
+    # renamed duplicate
+    "Dark Condensed": {
         "import_font": """
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap');
         """,
@@ -124,7 +123,6 @@ def render_theme_css(theme_name: str):
       letter-spacing: .2px;
     }}
 
-    /* Sidebar */
     section[data-testid="stSidebar"] {{
       background: var(--bg-2) !important;
       border-right: 1px solid var(--border);
@@ -132,7 +130,6 @@ def render_theme_css(theme_name: str):
     section[data-testid="stSidebar"] * {{ color: var(--text) !important; }}
     section[data-testid="stSidebar"] label {{ font-weight: 600; color: var(--text-dim) !important; }}
 
-    /* Buttons */
     .stButton button {{
       background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.20));
       color: var(--text);
@@ -141,7 +138,6 @@ def render_theme_css(theme_name: str):
     }}
     .stButton button:hover {{ filter: brightness(1.06); }}
 
-    /* Card */
     .pro-card {{
       background: var(--bg-2);
       border: 1px solid var(--border);
@@ -150,11 +146,10 @@ def render_theme_css(theme_name: str):
       box-shadow: 0 6px 18px rgba(0,0,0,0.35);
     }}
 
-    /* Links */
     a {{ text-decoration: none; color: var(--accent); }}
     a:hover {{ text-decoration: underline; }}
 
-    /* Table */
+    /* Table base */
     table {{
       border-collapse: collapse;
       font-size: 0.86rem;
@@ -169,6 +164,7 @@ def render_theme_css(theme_name: str):
       padding: 6px 8px;
       white-space: nowrap;
       font-weight: 600;
+      text-align: center;   /* center all headers */
     }}
     tbody td {{
       padding: 6px 8px;
@@ -177,19 +173,12 @@ def render_theme_css(theme_name: str):
     }}
     tbody tr:hover td {{ background: rgba(255,255,255,0.03) !important; }}
 
-    /* Header alignment using nth-child to mirror cell alignment */
-    /* Name, Industry left; rest right */
-    thead th:nth-child(1),
-    thead th:nth-child(2),
-    thead th:nth-child(3) {{ text-align: left; }}
-    thead th:nth-child(n+4) {{ text-align: right; }}
-
     h2, .stMarkdown h2 {{ color: var(--text); }}
     </style>
     """, unsafe_allow_html=True)
 
 # =========================================================
-# UI header (after theme inject)
+# UI header
 # =========================================================
 st.sidebar.header("Appearance")
 theme_choice = st.sidebar.selectbox("Theme", list(THEMES.keys()), index=0)
@@ -203,7 +192,7 @@ st.markdown('<div class="hero-title">Rotational Momentum Screener</div>', unsafe
 BENCHMARKS: Dict[str, str] = {
     "NIFTY 50": "^NSEI",
     "Nifty 200": "^CNX200",
-    "Nifty 500": "^CRSLDX",                   # if this ever fails, swap to a suitable proxy
+    "Nifty 500": "^CRSLDX",
     "Nifty Midcap 150": "^NIFTYMIDCAP150.NS",
     "Nifty Smallcap 250": "^NIFTYSMLCAP250.NS",
 }
@@ -317,15 +306,15 @@ def load_universe_from_csv(url: str) -> pd.DataFrame:
 
 def _period_years_to_dates(period: str) -> tuple[pd.Timestamp, pd.Timestamp]:
     years_map = {"1y": 1, "2y": 2, "3y": 3, "5y": 5}
-    years = years_map.get(period, 2)  # default 2y
+    years = years_map.get(period, 2)
     today_ist = pd.Timestamp.now(tz="Asia/Kolkata").normalize()
-    end = today_ist + pd.Timedelta(days=1)  # exclusive, ensures today included
+    end = today_ist + pd.Timedelta(days=1)
     start = today_ist - pd.DateOffset(years=years)
     return start, end
 
 @st.cache_data(show_spinner=True, ttl=1800)
 def fetch_prices(tickers: List[str], benchmark: str, period: str, interval: str = "1d") -> pd.DataFrame:
-    interval = "1d"  # EOD only
+    interval = "1d"
     start, end = _period_years_to_dates(period)
     try:
         data = yf.download(
@@ -347,11 +336,12 @@ def fetch_prices(tickers: List[str], benchmark: str, period: str, interval: str 
         return pd.DataFrame()
 
     if not isinstance(data.index, pd.DatetimeIndex):
-        try: data.index = pd.to_datetime(data.index)
-        except Exception: pass
+        try:
+            data.index = pd.to_datetime(data.index)
+        except Exception:
+            pass
     return data
 
-# Row band colors read from CSS vars
 def row_bg_for_serial(sno: int) -> str:
     if sno <= 30: return "var(--band-top)"
     if sno <= 60: return "var(--band-mid1)"
@@ -403,7 +393,6 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
         raise RuntimeError("No tickers passed the filters. Try a longer Period (e.g., 3y) with 1d timeframe.")
     df = pd.DataFrame(rows)
 
-    # Round + ranks
     for c in ("Return_6M", "Return_3M", "Return_1M"):
         df[c] = pd.to_numeric(df[c], errors="coerce").round(1)
     df["RS-Ratio"] = pd.to_numeric(df["RS-Ratio"], errors="coerce").round(2)
@@ -414,7 +403,6 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
     df["Rank_1M"] = df["Return_1M"].rank(ascending=False, method="min")
     df["Final_Rank"] = df["Rank_6M"] + df["Rank_3M"] + df["Rank_1M"]
 
-   
     df = df.sort_values(by=["RS-Momentum", "RS-Ratio"], ascending=[False, False]).reset_index(drop=True)
     df.insert(0, "S.No", np.arange(1, len(df) + 1))
     df["Position"] = df["S.No"]
@@ -428,32 +416,27 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
     return df[order]
 
 def style_rows(df: pd.DataFrame) -> pd.io.formats.style.Styler:
-    """
-    Row banding + alignment + Performance color mapping (per spec).
-    """
-    # soft row banding by S.No
     def _row_style(r: pd.Series):
         bg = row_bg_for_serial(int(r["S.No"]))
         return [f"background-color: {bg}"] * len(df.columns)
 
-    styler = df.style.apply(lambda rr: _row_style(rr), axis=1)
-    styler = styler.format(escape=None)
+    styler = df.style.apply(lambda rr: _row_style(rr), axis=1).format(escape=None)
 
-    # Alignment
-    text_cols = ["Name", "Industry"]
-    num_cols = [c for c in df.columns if c not in text_cols]
-    styler = styler.set_properties(subset=text_cols, **{"text-align": "left"})
-    styler = styler.set_properties(subset=num_cols, **{"text-align": "right", "font-variant-numeric": "tabular-nums"})
+    # Alignment: Name & Industry left; all others centered
+    left_cols = ["Name", "Industry"]
+    center_cols = [c for c in df.columns if c not in left_cols]
 
-    # Header alignment via nth-child rules + base styles
-    th_rules = []
-    for i, col in enumerate(df.columns, start=1):
-        align = "left" if col in text_cols else "right"
-        th_rules.append({"selector": f"thead th:nth-child({i})", "props": f"text-align: {align};"})
+    styler = styler.set_properties(subset=left_cols, **{"text-align": "left"})
+    styler = styler.set_properties(subset=center_cols, **{
+        "text-align": "center",
+        "font-variant-numeric": "tabular-nums"
+    })
+
+    # Keep base table style
     base_rules = [{"selector": "table", "props": "border-collapse: collapse;"}]
-    styler = styler.set_table_styles(base_rules + th_rules)
+    styler = styler.set_table_styles(base_rules)
 
-    # ---- Performance color mapping (exact hues per request) ----
+    # Performance color mapping
     perf_color_map = {
         "Leading":   "var(--perf-leading)",
         "Improving": "var(--perf-improving)",
@@ -466,7 +449,6 @@ def style_rows(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     styler = styler.set_td_classes(pd.DataFrame("", index=df.index, columns=df.columns))
     styler = styler.set_properties(**{}).apply(lambda _: perf_styles, axis=None)
 
-    # Hide index
     try:
         styler = styler.hide(axis="index")
     except Exception:
@@ -480,11 +462,10 @@ def style_rows(df: pd.DataFrame) -> pd.io.formats.style.Styler:
 # Controls
 # =========================================================
 st.sidebar.header("Controls")
-indices_universe = st.sidebar.selectbox("Indices Universe", list(CSV_FILES.keys()), index=0)   # Nifty 200
-benchmark_key    = st.sidebar.selectbox("Benchmark", list(BENCHMARKS.keys()), index=2)         # Nifty 500
+indices_universe = st.sidebar.selectbox("Indices Universe", list(CSV_FILES.keys()), index=0)
+benchmark_key    = st.sidebar.selectbox("Benchmark", list(BENCHMARKS.keys()), index=2)
 timeframe        = st.sidebar.selectbox("Timeframe (EOD only)", ["1d"], index=0)
 period           = st.sidebar.selectbox("Period", ["1y", "2y", "3y", "5y"], index=1)
-top_n            = st.sidebar.slider("Show Top N", min_value=10, max_value=100, value=100, step=10)
 do_load          = st.sidebar.button("Load / Refresh", use_container_width=True)
 
 if "ran_once" not in st.session_state:
@@ -510,7 +491,6 @@ if do_load:
 
         df = build_table_dataframe(raw, benchmark, universe_df)
 
-        # Build UI table (sorted already by RS-Momentum, RS-Ratio desc)
         ui_cols = [
             "S.No", "Name", "Industry",
             "Return_6M", "Rank_6M",
@@ -526,16 +506,13 @@ if do_load:
         )
         display_df = display_df.drop(columns=["Chart"])
 
-       
-
-        # Show only top N rows
-        display_df = display_df.head(top_n)
+        # No Top-N cap — show all rows
         table_html = style_rows(display_df).to_html()
         st.markdown(f'<div class="pro-card">{table_html}</div>', unsafe_allow_html=True)
 
         st.caption(f"{len(df)} results in universe • {indices_universe} • {benchmark_key} • 1d EOD • {period}")
 
-        # Export CSV (without Symbol per your earlier preference)
+        # Export CSV (Symbol excluded)
         csv_bytes = df.drop(columns=["Symbol"]).to_csv(index=False).encode("utf-8")
         st.download_button(
             "Export CSV",
@@ -547,9 +524,3 @@ if do_load:
 
     except Exception as e:
         st.error(str(e))
-
-
-
-
-
-
