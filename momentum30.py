@@ -22,7 +22,7 @@ html, body, [class*="css"], .stMarkdown, .stText, .stSelectbox, .stButton, .stDa
 
 /* Hero title */
 .hero-title {
-  font-weight: 800; font-size: clamp(28px, 5vw, 48px); line-height: 1.1;
+  font-weight: 800; font-size: clamp(28px, 5vw, 60px); line-height: 1.1;
   margin: 6px 0 12px 0;
   background: linear-gradient(90deg, #2bb0ff, #7a5cff 45%, #ff6cab 90%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
@@ -352,3 +352,4 @@ if do_load:
 
     except Exception as e:
         st.error(str(e))
+
