@@ -1,11 +1,54 @@
-import os
-import pandas as pd
+
+from __future__ import annotations
 import numpy as np
+import pandas as pd
 import yfinance as yf
 import streamlit as st
 
-# ================== CONFIG ==================
-# Benchmarks (unchanged as requested)
+
+st.set_page_config(page_title="Alpha Momentum Screener", layout="wide")
+
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap');
+
+:root { --app-font: 'Plus Jakarta Sans', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+
+/* Apply font */
+html, body, [class*="css"], .stMarkdown, .stText, .stSelectbox, .stButton, .stDataFrame { font-family: var(--app-font) !important; }
+
+/* Minimal, premium hero title */
+.hero-title {
+  font-weight: 800;
+  font-size: clamp(28px, 5vw, 48px);
+  line-height: 1.1;
+  margin: 6px 0 10px 0;
+  background: linear-gradient(90deg, #2bb0ff, #7a5cff 45%, #ff6cab 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: .2px;
+}
+
+/* Layout spacing */
+.block-container { padding-top: 1.4rem; }
+
+/* Sidebar labels */
+section[data-testid="stSidebar"] label { font-weight: 700; }
+
+/* Table polish */
+a { text-decoration: none; }
+a:hover { text-decoration: underline; }
+table { border-collapse: collapse; font-size: 0.95rem; }
+thead th { position: sticky; top: 0; z-index: 1; background: #e9f0f7; }
+th, td { border: 1px solid #c9d1d9; padding: 6px 10px; }
+tbody tr:hover td { filter: brightness(0.98); }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown('<div class="hero-title">Alpha Momentum Screener</div>', unsafe_allow_html=True)
+
+
 BENCHMARKS = {
     "NIFTY 50": "^NSEI",
     "Nifty 200": "^CNX200",
@@ -14,7 +57,7 @@ BENCHMARKS = {
     "Nifty Smallcap 250": "^NIFTYSMLCAP250.NS",
 }
 
-# Universes hosted on your GitHub
+
 GITHUB_BASE = "https://raw.githubusercontent.com/anki1007/alphamomentum/main/"
 CSV_FILES = {
     "Nifty 200":           GITHUB_BASE + "nifty200.csv",
@@ -25,10 +68,8 @@ CSV_FILES = {
     "Nifty Total Market":  GITHUB_BASE + "niftytotalmarket.csv",
 }
 
-# JdK/RS parameters
-RS_LOOKBACK_DAYS = 252    # ~1 year for relative strength window
-JDK_WINDOW = 21           # Standard JdK window
-
+RS_LOOKBACK_DAYS = 252
+JDK_WINDOW = 21
 
 # ================== HELPERS ==================
 def tv_symbol_from_yf(symbol: str) -> str:
@@ -38,14 +79,11 @@ def tv_symbol_from_yf(symbol: str) -> str:
 def tradingview_chart_url(symbol: str) -> str:
     return f"https://in.tradingview.com/chart/?symbol={tv_symbol_from_yf(symbol)}"
 
-def _pick_close(df, symbol: str) -> pd.Series:
-    """Safely pick Close/Adj Close for ticker from yfinance output (works for single/multi-index)."""
+def _pick_close(df: pd.DataFrame | pd.Series, symbol: str) -> pd.Series:
     if isinstance(df, pd.Series):
-        return df.dropna()
-
+        return pd.to_numeric(df, errors="coerce").dropna()
     if not isinstance(df, pd.DataFrame) or df.empty:
         return pd.Series(dtype=float)
-
     if isinstance(df.columns, pd.MultiIndex):
         for lvl in ("Close", "Adj Close"):
             col = (symbol, lvl)
@@ -59,21 +97,17 @@ def _pick_close(df, symbol: str) -> pd.Series:
         return pd.Series(dtype=float)
 
 def jdk_components(price: pd.Series, bench: pd.Series, win: int = JDK_WINDOW):
-    """Compute JdK RS-Ratio and RS-Momentum standardized around 100/101 respectively."""
     df = pd.concat([price.rename("p"), bench.rename("b")], axis=1).dropna()
     if df.empty:
         return pd.Series(dtype=float), pd.Series(dtype=float)
-
     rs = 100 * (df["p"] / df["b"])
     m = rs.rolling(win).mean()
     s = rs.rolling(win).std(ddof=0).replace(0, np.nan).fillna(1e-9)
     rs_ratio = (100 + (rs - m) / s).dropna()
-
     rroc = rs_ratio.pct_change().mul(100)
     m2 = rroc.rolling(win).mean()
     s2 = rroc.rolling(win).std(ddof=0).replace(0, np.nan).fillna(1e-9)
     rs_mom = (101 + (rroc - m2) / s2).dropna()
-
     ix = rs_ratio.index.intersection(rs_mom.index)
     return rs_ratio.loc[ix], rs_mom.loc[ix]
 
@@ -84,25 +118,19 @@ def perf_quadrant(x: float, y: float) -> str:
     return "Weakening"
 
 def analyze_momentum(adj: pd.Series) -> dict | None:
-    """Filter + compute 6M/3M/1M returns if basic momentum conditions pass."""
     if adj is None or adj.empty or len(adj) < 252:
         return None
-
     ema100 = adj.ewm(span=100, adjust=False).mean()
     try:
         one_year_return = (adj.iloc[-1] / adj.iloc[-252] - 1.0) * 100.0
     except Exception:
         return None
-
     high_52w = adj.iloc[-252:].max()
     within_20pct_high = adj.iloc[-1] >= high_52w * 0.8
-
     if len(adj) < 126:
         return None
-
     six_month = adj.iloc[-126:]
     up_days_pct = (six_month.pct_change() > 0).sum() / len(six_month) * 100.0
-
     if (adj.iloc[-1] >= ema100.iloc[-1] and one_year_return >= 6.5 and
         within_20pct_high and up_days_pct > 45.0):
         try:
@@ -132,56 +160,51 @@ def load_universe_from_csv(url: str) -> pd.DataFrame:
     return df
 
 @st.cache_data(show_spinner=True)
-def fetch_prices(tickers: list, benchmark: str, period: str, interval: str):
-    return yf.download(
+def fetch_prices(tickers: list[str], benchmark: str, period: str, interval: str) -> pd.DataFrame:
+    data = yf.download(
         tickers + [benchmark],
-        period=period,            # e.g., "2y"
-        interval=interval,        # e.g., "1d"
+        period=period,
+        interval=interval,
         auto_adjust=True,
         group_by="ticker",
         progress=False,
         threads=True,
     )
+    if not isinstance(data.index, pd.DatetimeIndex):
+        try: data.index = pd.to_datetime(data.index)
+        except Exception: pass
+    return data
 
 def row_bg_for_serial(sno: int) -> str:
-    """Color bands by rank buckets."""
     if sno <= 30: return "#dff5df"  # light green
     if sno <= 60: return "#fff6b3"  # light yellow
     if sno <= 90: return "#dfe9ff"  # light blue
     return "#f7d6d6"                # light red
 
-def build_table_dataframe(raw, benchmark: str, universe_df: pd.DataFrame) -> pd.DataFrame:
+def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.DataFrame) -> pd.DataFrame:
     bench = _pick_close(raw, benchmark).dropna()
     if bench.empty:
         raise RuntimeError(f"Benchmark {benchmark} series empty")
-
     cutoff = bench.index.max() - pd.Timedelta(days=RS_LOOKBACK_DAYS + 5)
     bench_rs = bench.loc[bench.index >= cutoff].copy()
 
     rows = []
     for _, rec in universe_df.iterrows():
-        sym = rec.Symbol
-        name = rec.Name
-        industry = rec.Industry
-
+        sym, name, industry = rec.Symbol, rec.Name, rec.Industry
         s = _pick_close(raw, sym).dropna()
         if s.empty:
             continue
-
         mom = analyze_momentum(s)
         if mom is None:
             continue
-
         s_rs = s.loc[s.index >= cutoff].copy()
         rr, mm = jdk_components(s_rs, bench_rs)
         if rr.empty or mm.empty:
             continue
-
         ix = rr.index.intersection(mm.index)
         rr_last = float(rr.loc[ix].iloc[-1])
         mm_last = float(mm.loc[ix].iloc[-1])
         status = perf_quadrant(rr_last, mm_last)
-
         rows.append({
             "Name": name,
             "Industry": industry,
@@ -196,26 +219,22 @@ def build_table_dataframe(raw, benchmark: str, universe_df: pd.DataFrame) -> pd.
         })
 
     if not rows:
-        raise RuntimeError("No tickers passed the filters.")
-
+        raise RuntimeError("No tickers passed the filters. Try a longer Period and Timeframe=1d.")
     df = pd.DataFrame(rows)
 
-    # Round numbers
     for col in ("Return_6M", "Return_3M", "Return_1M"):
         df[col] = pd.to_numeric(df[col], errors="coerce").round(1)
     df["RS-Ratio"] = pd.to_numeric(df["RS-Ratio"], errors="coerce").round(2)
     df["RS-Momentum"] = pd.to_numeric(df["RS-Momentum"], errors="coerce").round(2)
 
-    # Ranks and final position
     df["Rank_6M"] = df["Return_6M"].rank(ascending=False, method="min")
     df["Rank_3M"] = df["Return_3M"].rank(ascending=False, method="min")
     df["Rank_1M"] = df["Return_1M"].rank(ascending=False, method="min")
     df["Final_Rank"] = df["Rank_6M"] + df["Rank_3M"] + df["Rank_1M"]
-    df = df.sort_values("Final_Rank").reset_index(drop=True)
+    df = df.sort_values("Final_Rank", kind="mergesort").reset_index(drop=True)
     df["Position"] = np.arange(1, len(df) + 1)
     df.insert(0, "S.No", np.arange(1, len(df) + 1))
 
-    # Column order
     order = ["S.No", "Name", "Industry",
              "Return_6M", "Rank_6M",
              "Return_3M", "Rank_3M",
@@ -225,52 +244,47 @@ def build_table_dataframe(raw, benchmark: str, universe_df: pd.DataFrame) -> pd.
     return df[order]
 
 def style_rows(df: pd.DataFrame):
-    """Apply row background based on S.No and align text columns left."""
-    def _row_style(_row):
+    """Row banding + alignment; allow HTML in Name."""
+    def _row_style(_row: pd.Series):
         sno = int(_row["S.No"])
         bg = row_bg_for_serial(sno)
         return [f"background-color: {bg}"] * len(df.columns)
 
     styler = df.style.apply(lambda r: _row_style(r), axis=1)
-    # Left-align text columns
     styler = styler.set_properties(subset=["Name", "Industry"], **{"text-align": "left"})
-    # Center other columns
-    num_cols = [c for c in df.columns if c not in ("Name", "Industry", "Chart", "Symbol")]
-    styler = styler.set_properties(subset=num_cols, **{"text-align": "center"})
+    styler = styler.set_properties(
+        subset=[c for c in df.columns if c not in ("Name", "Industry")],
+        **{"text-align": "center"}
+    )
+    # allow HTML for Name (link)
+    styler = styler.format({"Name": lambda v: v}, escape=False)
+
+    # stable borders & sticky header are driven by page CSS; keep index hidden
+    try:
+        styler = styler.hide(axis="index")
+    except Exception:
+        pass
     return styler
 
-
-# ================== STREAMLIT UI ==================
-st.set_page_config(page_title="Momentum Screener", layout="wide")
-st.title("Momentum Screener")
-
-# Sidebar controls
+# ================== SIDEBAR ==================
 st.sidebar.header("Controls")
-indices_universe = st.sidebar.selectbox("a) Indices Universe", list(CSV_FILES.keys()), index=4)
-benchmark_key = st.sidebar.selectbox("b) Benchmark", list(BENCHMARKS.keys()), index=1)
-timeframe = st.sidebar.selectbox("c) Timeframe", ["1d", "1wk", "1mo"], index=0)
-period = st.sidebar.selectbox("d) Period", ["1y", "2y", "3y", "5y"], index=1)
+indices_universe = st.sidebar.selectbox("Indices Universe", list(CSV_FILES.keys()), index=4)
+benchmark_key    = st.sidebar.selectbox("Benchmark", list(BENCHMARKS.keys()), index=1)
+timeframe        = st.sidebar.selectbox("Timeframe", ["1d", "1wk", "1mo"], index=0)
+period           = st.sidebar.selectbox("Period", ["1y", "2y", "3y", "5y"], index=1)
+do_load          = st.sidebar.button("Load / Refresh", use_container_width=True)
 
-col_btn1, _ = st.sidebar.columns(2)
-do_load = col_btn1.button("e) Load / Refresh", use_container_width=True)
-
-st.caption(
-    "Tip: Results depend on the CSV universe and available price history. "
-    "If few rows appear, try a longer **Period** (e.g., 2y+) and **Timeframe** = 1d."
-)
-
-# Auto-run first time
+# Auto-run on first load
 if "ran_once" not in st.session_state:
     st.session_state.ran_once = True
     do_load = True
 
+# ================== ACTION ==================
 if do_load:
     try:
-        # Universe
         uni_url = CSV_FILES[indices_universe]
         universe_df = load_universe_from_csv(uni_url)
 
-        # Prices
         benchmark = BENCHMARKS[benchmark_key]
         tickers = universe_df["Symbol"].tolist()
 
@@ -279,7 +293,7 @@ if do_load:
 
         df = build_table_dataframe(raw, benchmark, universe_df)
 
-        # Display subset (hide Symbol column in UI as requested)
+        # Build UI view: Name as hyperlink; hide Chart column
         display_cols = [
             "S.No", "Name", "Industry",
             "Return_6M", "Rank_6M",
@@ -289,24 +303,23 @@ if do_load:
             "Final_Rank", "Position", "Chart"
         ]
         display_df = df[display_cols].copy()
-
-        st.subheader("Screened Momentum Table")
-
-        # NOTE: st.table renders pandas Styler (row coloring). st.dataframe currently does not.
-        st.table(
-            style_rows(display_df)
+        display_df["Name"] = display_df.apply(
+            lambda r: f'<a href="{r["Chart"]}" target="_blank" rel="noopener noreferrer">{r["Name"]}</a>',
+            axis=1
         )
+        display_df = display_df.drop(columns=["Chart"])
 
-        # Summary
-        st.info(
-            f"Rows: **{len(df)}**  |  Universe: **{indices_universe}**  |  "
-            f"Benchmark: **{benchmark_key}**  |  Timeframe: **{timeframe}**  |  Period: **{period}**"
-        )
+        st.subheader("Alpha Momentum 30")
+        styled = style_rows(display_df)
+        st.markdown(styled.to_html(), unsafe_allow_html=True)
 
-        # Export CSV (without Symbol, as per UI)
+        # Summary (compact)
+        st.caption(f"{len(df)} results • {indices_universe} • {benchmark_key} • {timeframe} • {period}")
+
+        # Export CSV
         csv_bytes = df.drop(columns=["Symbol"]).to_csv(index=False).encode("utf-8")
         st.download_button(
-            label="f) Export CSV",
+            label="Export CSV",
             data=csv_bytes,
             file_name=f"{indices_universe.replace(' ', '').lower()}_momentum.csv",
             mime="text/csv",
@@ -314,5 +327,4 @@ if do_load:
         )
 
     except Exception as e:
-        st.error(str(e))
-
+        st.error(f"{e}")
