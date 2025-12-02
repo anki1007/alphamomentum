@@ -484,7 +484,7 @@ indices_universe = st.sidebar.selectbox("Indices Universe", list(CSV_FILES.keys(
 benchmark_key    = st.sidebar.selectbox("Benchmark", list(BENCHMARKS.keys()), index=2)         # Nifty 500
 timeframe        = st.sidebar.selectbox("Timeframe (EOD only)", ["1d"], index=0)
 period           = st.sidebar.selectbox("Period", ["1y", "2y", "3y", "5y"], index=1)
-top_n            = st.sidebar.slider("Show Top N", min_value=10, max_value=100, value=30, step=10)
+top_n            = st.sidebar.slider("Show Top N", min_value=10, max_value=100, value=100, step=10)
 do_load          = st.sidebar.button("Load / Refresh", use_container_width=True)
 
 if "ran_once" not in st.session_state:
@@ -547,6 +547,7 @@ if do_load:
 
     except Exception as e:
         st.error(str(e))
+
 
 
 
