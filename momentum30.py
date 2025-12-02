@@ -1,3 +1,4 @@
+# momentum30.py
 from __future__ import annotations
 
 import numpy as np
@@ -35,7 +36,7 @@ html, body, .stApp {
 
 .block-container { padding-top: 0.8rem; }
 
-/* Hero title (subtle, institutional) */
+/* Hero title */
 .hero-title {
   font-weight: 800;
   font-size: clamp(26px, 4.5vw, 40px);
@@ -48,29 +49,20 @@ html, body, .stApp {
   letter-spacing: .2px;
 }
 
-/* Sidebar panel */
+/* Sidebar */
 section[data-testid="stSidebar"] {
   background: var(--bg-2) !important;
   border-right: 1px solid var(--border);
 }
 section[data-testid="stSidebar"] * { color: var(--text) !important; }
 section[data-testid="stSidebar"] label { font-weight: 800; color: var(--text-dim) !important; letter-spacing:.2px; }
-
-/* Sidebar select / inputs – premium feel */
-section[data-testid="stSidebar"] .stSelectbox > div {
-  border-radius: 12px;
-}
+section[data-testid="stSidebar"] .stSelectbox > div { border-radius: 12px; }
 section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
-  min-height: 42px;
-  font-size: 0.98rem;
-  font-weight: 700;
-  padding-left: 6px;
+  min-height: 42px; font-size: 0.98rem; font-weight: 700; padding-left: 6px;
 }
-section[data-testid="stSidebar"] .stSelectbox label {
-  font-size: 0.92rem;
-}
+section[data-testid="stSidebar"] .stSelectbox label { font-size: 0.92rem; }
 
-/* Buttons (sidebar) */
+/* Buttons */
 .stButton button {
   background: linear-gradient(180deg, #1b2432, #131922);
   color: var(--text);
@@ -81,7 +73,7 @@ section[data-testid="stSidebar"] .stSelectbox label {
 }
 .stButton button:hover { filter: brightness(1.06); }
 
-/* ---- Pro table card ---- */
+/* Card wrapper for table */
 .pro-card {
   background: var(--bg-2);
   border: 1px solid var(--border);
@@ -90,39 +82,11 @@ section[data-testid="stSidebar"] .stSelectbox label {
   box-shadow: 0 6px 18px rgba(0,0,0,0.35);
 }
 
-/* Table: dense & crisp */
+/* Links */
 a { text-decoration: none; color: #9ecbff; }
 a:hover { text-decoration: underline; }
 
-table { 
-  border-collapse: collapse; 
-  font-size: 0.86rem;          /* denser typography */
-  width: 100%; 
-  color: var(--text);
-}
-thead th { 
-  position: sticky; top: 0; z-index: 2; 
-  background: #121823; 
-  color: var(--text-dim);
-  border-bottom: 1px solid var(--border);
-  padding: 6px 8px;            /* compact header */
-  white-space: nowrap;
-}
-tbody td { 
-  padding: 6px 8px;            /* compact rows */
-  border-top: 1px solid var(--border-soft);
-  white-space: nowrap;
-}
-
-/* Alignment: left for text columns, right for numbers */
-td[data-col="Name"], th[data-col="Name"],
-td[data-col="Industry"], th[data-col="Industry"] { text-align: left; }
-td[data-col="num"], th[data-col="num"] { text-align: right; font-variant-numeric: tabular-nums; }
-
-/* Hover */
-tbody tr:hover td { background: rgba(255,255,255,0.02) !important; }
-
-/* Subheader */
+/* Headings */
 h2, .stMarkdown h2 { color: var(--text); }
 </style>
 """, unsafe_allow_html=True)
@@ -147,7 +111,7 @@ CSV_FILES: Dict[str, str] = {
     "Nifty Total Market":  GITHUB_BASE + "niftytotalmarket.csv",
 }
 RS_LOOKBACK_DAYS = 252
-JDK_WINDOW = 21
+JDK_WINDOW = 21  # rolling window for JdK
 
 # -------------------- HELPERS --------------------
 def tv_symbol_from_yf(symbol: str) -> str:
@@ -241,7 +205,7 @@ def _period_years_to_dates(period: str) -> tuple[pd.Timestamp, pd.Timestamp]:
     years_map = {"1y": 1, "2y": 2, "3y": 3, "5y": 5}
     years = years_map.get(period, 2)  # default 2y
     today_ist = pd.Timestamp.now(tz="Asia/Kolkata").normalize()
-    end = today_ist + pd.Timedelta(days=1)      # exclusive, ensures today included
+    end = today_ist + pd.Timedelta(days=1)      # exclusive — include today's EOD
     start = today_ist - pd.DateOffset(years=years)
     return start, end
 
@@ -261,8 +225,7 @@ def fetch_prices(tickers: List[str], benchmark: str, period: str, interval: str 
             threads=True,
         )
     except Exception as e:
-        msg = str(e)
-        if "Rate limited" in msg or "Too Many Requests" in msg:
+        if "Rate limited" in str(e) or "Too Many Requests" in str(e):
             st.warning("Yahoo Finance rate limited the request. Please try again shortly.")
         else:
             st.error(f"Data download failed: {e}")
@@ -272,7 +235,7 @@ def fetch_prices(tickers: List[str], benchmark: str, period: str, interval: str 
         except Exception: pass
     return data
 
-# ---------- Rank band colors tuned for dark mode (Bloomberg-like) ----------
+# ---------- Row band colors tuned for dark mode ----------
 def row_bg_for_serial(sno: int) -> str:
     if sno <= 30: return "rgba(46, 204, 113, 0.12)"
     if sno <= 60: return "rgba(255, 204, 0, 0.12)"
@@ -317,12 +280,12 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
         raise RuntimeError("No tickers passed the filters. Try a longer Period (e.g., 3y) with 1d timeframe.")
     df = pd.DataFrame(rows)
 
-    # ---- Round values: 2 decimals for metrics; integer for ranks/position ----
+    # 2-decimal rounding for metrics
     two_dec_cols = ["Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum"]
     for c in two_dec_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce").round(2)
 
-    # Ranks
+    # Ranks & integer fields
     df["Rank_6M"] = df["Return_6M"].rank(ascending=False, method="min")
     df["Rank_3M"] = df["Return_3M"].rank(ascending=False, method="min")
     df["Rank_1M"] = df["Return_1M"].rank(ascending=False, method="min")
@@ -331,9 +294,7 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
     df.insert(0, "S.No", np.arange(1, len(df) + 1))
     df["Position"] = df["S.No"]
 
-    # cast integer-like columns to int
-    int_cols = ["S.No", "Rank_6M", "Rank_3M", "Rank_1M", "Final_Rank", "Position"]
-    for c in int_cols:
+    for c in ["S.No", "Rank_6M", "Rank_3M", "Rank_1M", "Final_Rank", "Position"]:
         df[c] = pd.to_numeric(df[c], errors="coerce").round(0).astype("Int64")
 
     order = ["S.No", "Name", "Industry",
@@ -344,49 +305,59 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
              "Final_Rank", "Position", "Chart", "Symbol"]
     return df[order]
 
+# ---------- Styler with internal CSS & formatting (works in Streamlit sandbox) ----------
 def style_rows(df: pd.DataFrame):
     """
-    Institutional row styling + alignment + HTML links (Pandas 2.2+ safe).
-    Also formats numbers: 2 decimals for metrics; integer for ranks/position.
+    - Applies 2 decimals for metrics; integers for ranks/position
+    - Font & sizing injected INSIDE the Styler (so it takes effect)
+    - Row banding; alignment; hyperlink preserved
     """
     def _row_style(r: pd.Series):
         bg = row_bg_for_serial(int(r["S.No"]))
         return [f"background-color: {bg}"] * len(df.columns)
 
-    styler = df.style.apply(lambda rr: _row_style(rr), axis=1)
+    styler = df.style.apply(_row_style, axis=1)
 
-    # Disable escaping globally, then allow Name HTML
+    # Format numbers
+    two_dec_cols = ["Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum"]
+    int_cols     = ["S.No", "Rank_6M", "Rank_3M", "Rank_1M", "Final_Rank", "Position"]
+    for c in two_dec_cols:
+        styler = styler.format({c: (lambda v: "" if pd.isna(v) else f"{float(v):.2f}")})
+    for c in int_cols:
+        styler = styler.format({c: (lambda v: "" if pd.isna(v) else f"{int(round(float(v)))}")})
+
+    # Allow HTML for Name + disable escaping
     styler = styler.format(escape=None).format({"Name": lambda v: v})
 
-    # Align text vs numbers
+    # Internal table CSS (font size/family + compact paddings)
+    styler = styler.set_table_styles([
+        {"selector": "table", "props":
+            "font-size:0.86rem; font-family:'Plus Jakarta Sans',system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;"
+        },
+        {"selector": "th", "props": "font-size:0.88rem; font-weight:700; background:#121823; color:#b3bdc7; position:sticky; top:0; z-index:2;"},
+        {"selector": "th, td", "props": "padding:6px 8px; border-top:1px solid #1a2230; white-space:nowrap;"},
+    ], overwrite=False)
+
+    # Alignment
     text_cols = ["Name", "Industry"]
-    num_cols = [c for c in df.columns if c not in text_cols]
+    num_cols  = [c for c in df.columns if c not in text_cols]
     styler = styler.set_properties(subset=text_cols, **{"text-align": "left"})
-    styler = styler.set_properties(subset=num_cols, **{"text-align": "right", "font-variant-numeric": "tabular-nums"})
+    styler = styler.set_properties(subset=num_cols,  **{"text-align": "right", "font-variant-numeric": "tabular-nums"})
 
-    # Number formatting
-    two_dec_cols = ["Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum"]
-    int_cols = ["S.No", "Rank_6M", "Rank_3M", "Rank_1M", "Final_Rank", "Position"]
-    for c in two_dec_cols:
-        styler = styler.format({c: lambda v: "" if pd.isna(v) else f"{float(v):.2f}"})
-    for c in int_cols:
-        styler = styler.format({c: lambda v: "" if pd.isna(v) else f"{int(round(float(v)))}"})
-
-    # Hide index
     try: styler = styler.hide(axis="index")
     except Exception: pass
     return styler
 
-# -------------------- SIDEBAR (DEFAULTS) --------------------
+# -------------------- SIDEBAR --------------------
 st.sidebar.header("Controls")
 indices_universe = st.sidebar.selectbox("Indices Universe", list(CSV_FILES.keys()), index=0)  # Nifty 200
 benchmark_key    = st.sidebar.selectbox("Benchmark", list(BENCHMARKS.keys()), index=2)        # Nifty 500
 timeframe        = st.sidebar.selectbox("Timeframe (EOD only)", ["1d"], index=0)              # locked to 1d
 period           = st.sidebar.selectbox("Period", ["1y", "2y", "3y", "5y"], index=1)          # default 2y
 load_clicked     = st.sidebar.button("Load / Refresh", use_container_width=True)
-export_slot      = st.sidebar.empty()  # placeholder for Export button BELOW the Load/Refresh
+export_slot      = st.sidebar.empty()  # export button shown after data loads
 
-# Auto-run on first load
+# Auto-run first load
 if "ran_once" not in st.session_state:
     st.session_state.ran_once = True
     load_clicked = True
@@ -408,7 +379,7 @@ if load_clicked:
 
         df = build_table_dataframe(raw, benchmark, universe_df)
 
-        # Build UI view (hyperlink on Name; hide Chart)
+        # Build UI table: hyperlink on Name; hide Chart
         ui_cols = [
             "S.No", "Name", "Industry",
             "Return_6M", "Rank_6M",
@@ -430,7 +401,7 @@ if load_clicked:
 
         st.caption(f"{len(df)} results • {indices_universe} • {benchmark_key} • 1d EOD • {period}")
 
-        # ---- Export CSV in the SIDEBAR (under Load/Refresh) ----
+        # Export CSV under the Load/Refresh button (Symbol hidden)
         csv_bytes = df.drop(columns=["Symbol"]).to_csv(index=False).encode("utf-8")
         export_slot.download_button(
             "Export CSV",
