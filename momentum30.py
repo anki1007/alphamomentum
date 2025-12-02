@@ -308,11 +308,10 @@ if do_load:
         )
         display_df = display_df.drop(columns=["Chart"])
 
-        # --------- Rename Final_Rank -> Final Rank (fix split) ----------
-        display_df = display_df.rename(columns={"Final_Rank": "Final Rank"})
+        
+        display_df = display_df.rename(columns={"Final_Rank": "Final_Rank"})
 
-        # --------- Force formatting for visible table ----------
-        int_cols = ["S.No", "Rank_6M", "Rank_3M", "Rank_1M", "Final Rank", "Position"]
+        int_cols = ["S.No", "Rank_6M", "Rank_3M", "Rank_1M", "Final_Rank", "Position"]
         two_dec_cols = ["Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum"]
 
         for c in int_cols:
@@ -343,3 +342,4 @@ if do_load:
 
     except Exception as e:
         st.error(str(e))
+
