@@ -22,7 +22,7 @@ html, body, [class*="css"], .stMarkdown, .stText, .stSelectbox, .stButton, .stDa
 
 /* Hero title */
 .hero-title {
-  font-weight: 800; font-size: clamp(28px, 5vw, 48px); line-height: 1.1;
+  font-weight: 800; font-size: clamp(28px, 5vw, 36px); line-height: 1.1;
   margin: 6px 0 12px 0;
   background: linear-gradient(90deg, #2bb0ff, #7a5cff 45%, #ff6cab 90%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
@@ -48,13 +48,13 @@ st.markdown('<div class="hero-title">Alpha Momentum Screener</div>', unsafe_allo
 BENCHMARKS: Dict[str, str] = {
     "NIFTY 50": "^NSEI",
     "Nifty 200": "^CNX200",
-    "Nifty 500": "^CRSLDX",
+    "Nifty 500": "^CRSLDX",             # default benchmark
     "Nifty Midcap 150": "^NIFTYMIDCAP150.NS",
     "Nifty Smallcap 250": "^NIFTYSMLCAP250.NS",
 }
 GITHUB_BASE = "https://raw.githubusercontent.com/anki1007/alphamomentum/main/"
 CSV_FILES: Dict[str, str] = {
-    "Nifty 200":           GITHUB_BASE + "nifty200.csv",
+    "Nifty 200":           GITHUB_BASE + "nifty200.csv",      # default universe
     "Nifty 500":           GITHUB_BASE + "nifty500.csv",
     "Nifty Midcap 150":    GITHUB_BASE + "niftymidcap150.csv",
     "Nifty Mid Small 400": GITHUB_BASE + "niftymidsmallcap400.csv",
@@ -161,13 +161,31 @@ def load_universe_from_csv(url: str) -> pd.DataFrame:
     df = df[df["Symbol"] != ""].drop_duplicates(subset=["Symbol"])
     return df
 
+def _period_years_to_dates(period: str) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """
+    Convert '1y'/'2y'/'3y'/'5y' to explicit (start, end) dates anchored to 'today' IST.
+    yfinance's 'end' is exclusive, so we return end = today + 1 day to include today.
+    """
+    years_map = {"2y": 2, "3y": 3, "5y": 5}
+    years = years_map.get(period, 1)
+    # Anchor to India time
+    today_ist = pd.Timestamp.now(tz="Asia/Kolkata").normalize()
+    end = today_ist + pd.Timedelta(days=1)  # exclusive upper bound to include 'today'
+    start = today_ist - pd.DateOffset(years=years)
+    # yfinance accepts tz-naive; we'll pass dates only
+    return start, end
+
 @st.cache_data(show_spinner=True)
 def fetch_prices(tickers: List[str], benchmark: str, period: str, interval: str) -> pd.DataFrame:
-    """Robust downloader with simple handling for YF rate limiting."""
+    """
+    Robust downloader fetching from explicit [start, end) so the latest date is today.
+    """
+    start, end = _period_years_to_dates(period)
     try:
         data = yf.download(
             tickers + [benchmark],
-            period=period,
+            start=start.date().isoformat(),
+            end=end.date().isoformat(),      # exclusive, so +1d ensures today is included
             interval=interval,
             auto_adjust=True,
             group_by="ticker",
@@ -275,7 +293,7 @@ def style_rows(df: pd.DataFrame):
 
 # -------------------- SIDEBAR (DEFAULTS) --------------------
 st.sidebar.header("Controls")
-# Defaults requested: Benchmark = "Nifty 500", Universe = "Nifty 200", Timeframe = "1d", Period = "1y"
+# Defaults: Benchmark = "Nifty 500", Universe = "Nifty 200", Timeframe = "1d", Period = "1y"
 indices_universe = st.sidebar.selectbox("Indices Universe", list(CSV_FILES.keys()), index=0)  # "Nifty 200"
 benchmark_key    = st.sidebar.selectbox("Benchmark", list(BENCHMARKS.keys()), index=2)        # "Nifty 500"
 timeframe        = st.sidebar.selectbox("Timeframe", ["1d", "1wk", "1mo"], index=0)           # "1d"
