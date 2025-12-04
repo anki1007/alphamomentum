@@ -201,6 +201,8 @@ BENCHMARKS: Dict[str, str] = {
 
 GITHUB_BASE = "https://raw.githubusercontent.com/anki1007/alphamomentum/main/"
 CSV_FILES: Dict[str, str] = {
+    "Nifty 50":            GITHUB_BASE + "nifty50.csv",
+    "Nifty 100":           GITHUB_BASE + "nifty100.csv",
     "Nifty 200":           GITHUB_BASE + "nifty200.csv",
     "Nifty 500":           GITHUB_BASE + "nifty500.csv",
     "Nifty Midcap 150":    GITHUB_BASE + "niftymidcap150.csv",
@@ -526,5 +528,6 @@ if do_load:
 
     except Exception as e:
         st.error(str(e))
+
 
 
