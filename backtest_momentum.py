@@ -1,11 +1,13 @@
+# app.py
 from __future__ import annotations
 
 import math
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
 import pandas as pd
 import streamlit as st
 import yfinance as yf
-from typing import List, Dict, Optional, Tuple
 
 # ================= UI THEME =================
 st.set_page_config(page_title="Alpha Momentum Screener + Backtest", layout="wide")
@@ -49,10 +51,9 @@ CSV_FILES: Dict[str, str] = {
 }
 RS_LOOKBACK_DAYS = 252
 JDK_WINDOW = 21
-BATCH_SIZE = 60
+BATCH_SIZE = 60  # yfinance-friendly batching
 
 # ================= SHARED HELPERS =================
-
 def tv_symbol_from_yf(symbol: str) -> str:
     s = symbol.strip().upper()
     return "NSE:" + (s[:-3] if s.endswith(".NS") else s)
@@ -82,10 +83,12 @@ def jdk_components(price: pd.Series, bench: pd.Series, win: int = JDK_WINDOW):
     if df.empty:
         return pd.Series(dtype=float), pd.Series(dtype=float)
     rs = 100.0 * (df["p"] / df["b"])  # relative strength vs benchmark
-    m = rs.rolling(win).mean(); s = rs.rolling(win).std(ddof=0).replace(0, np.nan).fillna(1e-9)
+    m = rs.rolling(win).mean()
+    s = rs.rolling(win).std(ddof=0).replace(0, np.nan).fillna(1e-9)
     rs_ratio = (100.0 + (rs - m) / s).dropna()
     rroc = rs_ratio.pct_change().mul(100.0)
-    m2 = rroc.rolling(win).mean(); s2 = rroc.rolling(win).std(ddof=0).replace(0, np.nan).fillna(1e-9)
+    m2 = rroc.rolling(win).mean()
+    s2 = rroc.rolling(win).std(ddof=0).replace(0, np.nan).fillna(1e-9)
     rs_mom = (101.0 + (rroc - m2) / s2).dropna()
     ix = rs_ratio.index.intersection(rs_mom.index)
     return rs_ratio.loc[ix], rs_mom.loc[ix]
@@ -138,8 +141,14 @@ def fetch_prices_batched(tickers: List[str], benchmark: str, period: str, interv
     for i, b in enumerate(batches, 1):
         try:
             dfb = yf.download(
-                b + [benchmark], start=start.date().isoformat(), end=end.date().isoformat(), interval="1d",
-                auto_adjust=True, group_by="ticker", progress=False, threads=True,
+                b + [benchmark],
+                start=start.date().isoformat(),
+                end=end.date().isoformat(),
+                interval="1d",
+                auto_adjust=True,
+                group_by="ticker",
+                progress=False,
+                threads=True,
             )
             dfs.append(dfb)
         except Exception as e:
@@ -153,7 +162,6 @@ def fetch_prices_batched(tickers: List[str], benchmark: str, period: str, interv
     return data
 
 # ================= Screener table =================
-
 def row_bg_for_serial(sno: int) -> str:
     if sno <= 30: return "rgba(46, 204, 113, 0.12)"
     if sno <= 60: return "rgba(255, 204, 0, 0.12)"
@@ -165,19 +173,25 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
     if bench.empty: raise RuntimeError(f"Benchmark {benchmark} series empty.")
     cutoff = bench.index.max() - pd.Timedelta(days=RS_LOOKBACK_DAYS + 5)
     bench_rs = bench.loc[bench.index >= cutoff].copy()
+
     rows = []
     for _, rec in universe_df.iterrows():
         sym, name, industry = rec.Symbol, rec.Name, rec.Industry
         s = _pick_close(raw, sym).dropna()
-        if s.empty or (not analyze_momentum(s)): continue
+        if s.empty or (not analyze_momentum(s)): 
+            continue
         s_rs = s.loc[s.index >= cutoff].copy()
         rr, mm = jdk_components(s_rs, bench_rs)
-        if rr.empty or mm.empty: continue
+        if rr.empty or mm.empty:
+            continue
         ix = rr.index.intersection(mm.index)
         rr_last = float(rr.loc[ix].iloc[-1]); mm_last = float(mm.loc[ix].iloc[-1])
+
         def ret_n(days: int) -> float | np.nan:
-            if len(s) >= days: return float((s.iloc[-1] / s.iloc[-days] - 1) * 100)
+            if len(s) >= days:
+                return float((s.iloc[-1] / s.iloc[-days] - 1) * 100)
             return np.nan
+
         rows.append({
             "Name": name,
             "Industry": industry,
@@ -188,12 +202,16 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
             "Performance": ("Leading" if rr_last>=100 and mm_last>=100 else "Improving" if rr_last<100 and mm_last>=100 else "Lagging" if rr_last<100 and mm_last<100 else "Weakening"),
             "Symbol": sym, "Chart": tradingview_chart_url(sym),
         })
-    if not rows: raise RuntimeError("No tickers passed the filters. Try a longer Period (e.g., 3y) with 1d timeframe.")
+    if not rows:
+        raise RuntimeError("No tickers passed the filters. Try a longer Period (e.g., 3y) with 1d timeframe.")
     df = pd.DataFrame(rows)
     for c in ("Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum"):
         df[c] = pd.to_numeric(df[c], errors="coerce").round(2)
+
     def safe_rank(series: pd.Series) -> pd.Series:
-        s = series.copy(); s.loc[~np.isfinite(s)] = np.nan; return s.rank(ascending=False, method="min")
+        s = series.copy(); s.loc[~np.isfinite(s)] = np.nan
+        return s.rank(ascending=False, method="min")
+
     df["Rank_6M"] = safe_rank(df["Return_6M"]).astype("Int64")
     df["Rank_3M"] = safe_rank(df["Return_3M"]).astype("Int64")
     df["Rank_1M"] = safe_rank(df["Return_1M"]).astype("Int64")
@@ -218,7 +236,6 @@ def style_rows(df: pd.DataFrame):
     return styler
 
 # ================= Backtest core + metrics =================
-
 def make_rebalance_dates(idx: pd.DatetimeIndex, code: str) -> List[pd.Timestamp]:
     idx = pd.DatetimeIndex(idx).sort_values().unique()
     if code.upper() == "W": key = pd.Grouper(freq="W-FRI")
@@ -231,25 +248,39 @@ def make_rebalance_dates(idx: pd.DatetimeIndex, code: str) -> List[pd.Timestamp]
 
 def rank_on_date(raw: pd.DataFrame, universe: List[str], benchmark: str, asof: pd.Timestamp) -> pd.DataFrame:
     bench = _pick_close(raw, benchmark); bench = bench[bench.index <= asof].dropna()
-    if bench.empty: return pd.DataFrame(columns=["Symbol","RS_Ratio","RS_Momentum","Score"]).set_index("Symbol")
+    if bench.empty:
+        return pd.DataFrame(columns=["Symbol","RS_Ratio","RS_Momentum","Score"]).set_index("Symbol")
     cutoff = bench.index.max() - pd.Timedelta(days=RS_LOOKBACK_DAYS + 5); bench_rs = bench.loc[bench.index >= cutoff]
     rows = []
     for sym in universe:
         s = _pick_close(raw, sym); s = s[s.index <= asof].dropna()
-        if s.empty or len(s) < RS_LOOKBACK_DAYS: continue
-        if not analyze_momentum(s): continue
+        if s.empty or len(s) < RS_LOOKBACK_DAYS: 
+            continue
+        if not analyze_momentum(s): 
+            continue
         s_rs = s.loc[s.index >= cutoff]
         rr, mm = jdk_components(s_rs, bench_rs)
-        if rr.empty or mm.empty: continue
+        if rr.empty or mm.empty: 
+            continue
         ix = rr.index.intersection(mm.index)
         rows.append((sym, float(rr.loc[ix].iloc[-1]), float(mm.loc[ix].iloc[-1])))
-    if not rows: return pd.DataFrame(columns=["Symbol","RS_Ratio","RS_Momentum","Score"]).set_index("Symbol")
+    if not rows:
+        return pd.DataFrame(columns=["Symbol","RS_Ratio","RS_Momentum","Score"]).set_index("Symbol")
     df = pd.DataFrame(rows, columns=["Symbol","RS_Ratio","RS_Momentum"]).set_index("Symbol")
-    df["rank_rr"] = df["RS_Ratio"].rank(ascending=False, method="min"); df["rank_mm"] = df["RS_Momentum"].rank(ascending=False, method="min")
+    df["rank_rr"] = df["RS_Ratio"].rank(ascending=False, method="min")
+    df["rank_mm"] = df["RS_Momentum"].rank(ascending=False, method="min")
     df["Score"] = df["rank_rr"] + df["rank_mm"]
     return df.sort_values(["Score","RS_Ratio","RS_Momentum"], ascending=[True, False, False])
 
-def backtest(raw_prices: pd.DataFrame, universe: List[str], benchmark: str, top_n: int = 30, rebalance: str = "M", start_date: Optional[pd.Timestamp] = None, init_capital: float = 1_000_000.0) -> Dict:
+def backtest(
+    raw_prices: pd.DataFrame,
+    universe: List[str],
+    benchmark: str,
+    top_n: int = 30,
+    rebalance: str = "M",
+    start_date: Optional[pd.Timestamp] = None,
+    init_capital: float = 1_000_000.0,
+) -> Dict:
     bench = _pick_close(raw_prices, benchmark).dropna()
     if bench.empty: raise ValueError("Benchmark series is empty.")
     start = max(bench.index.min(), (start_date or bench.index.min())); end = bench.index.max()
@@ -259,19 +290,24 @@ def backtest(raw_prices: pd.DataFrame, universe: List[str], benchmark: str, top_
     price_map = {sym: _pick_close(raw_prices, sym).dropna() for sym in (set(universe)|{benchmark})}
     price_map = {k:v for k,v in price_map.items() if not v.empty}
     ret_map = {k: v.pct_change().fillna(0.0) for k, v in price_map.items()}
+
     port_ret = pd.Series(0.0, index=dates); holdings: Dict[pd.Timestamp, List[str]] = {}
+
     for i, d0 in enumerate(rbd):
         d1 = rbd[i + 1] if i + 1 < len(rbd) else dates[-1]
         ranks = rank_on_date(raw_prices, universe, benchmark, d0)
         basket = ranks.head(top_n).index.tolist(); holdings[d0] = basket
-        if not basket: continue
+        if not basket: 
+            continue
         w = 1.0 / len(basket)
         period_idx = dates[(dates >= d0) & (dates <= d1)]
-        if len(period_idx) == 0: continue
+        if len(period_idx) == 0: 
+            continue
         daily_sum = pd.Series(0.0, index=period_idx); denom = pd.Series(0.0, index=period_idx)
         for sym in basket:
             r = ret_map.get(sym)
-            if r is None: continue
+            if r is None: 
+                continue
             rr = r.reindex(period_idx).dropna()
             daily_sum.loc[rr.index] = daily_sum.loc[rr.index] + w * rr
             denom.loc[rr.index] = denom.loc[rr.index] + w
@@ -279,10 +315,12 @@ def backtest(raw_prices: pd.DataFrame, universe: List[str], benchmark: str, top_
         period_ret = pd.Series(0.0, index=period_idx)
         period_ret.loc[valid.index[valid]] = (daily_sum.loc[valid] / denom.loc[valid]).values
         port_ret.loc[period_idx] = period_ret
+
     nav = (1.0 + port_ret).cumprod() * (init_capital); nav.name = "NAV"
     bench_ret = ret_map[benchmark].reindex(nav.index).fillna(0.0)
     return {"nav": nav, "daily_returns": port_ret, "holdings": holdings, "benchmark_ret": bench_ret, "init_capital": init_capital}
 
+# ----- Metrics -----
 def _drawdown(nav: pd.Series) -> Tuple[pd.Series, float, float]:
     cummax = nav.cummax(); dd = nav / cummax - 1.0
     return dd, float(dd.iloc[-1]), float(dd.min())
@@ -324,20 +362,57 @@ def _rolling_returns(nav: pd.Series, years: int) -> pd.Series:
     return ann.dropna()
 
 def build_metrics(bt: Dict) -> Dict:
-    nav: pd.Series = bt["nav"].copy(); port_ret: pd.Series = bt["daily_returns"].copy(); bench_ret: pd.Series = bt["benchmark_ret"].copy(); init_cap = float(bt["init_capital"])
-    current_cap = float(nav.iloc[-1]); nav_norm = nav / init_cap
-    mu_d = float(port_ret.mean()); sig_d = float(port_ret.std(ddof=0)); sharpe = (mu_d / sig_d * math.sqrt(252)) if sig_d > 0 else 0.0
+    nav: pd.Series = bt["nav"].copy()
+    port_ret: pd.Series = bt["daily_returns"].copy()
+    bench_ret: pd.Series = bt["benchmark_ret"].copy()
+    init_cap = float(bt["init_capital"])
+
+    current_cap = float(nav.iloc[-1])
+    nav_norm = nav / init_cap
+
+    mu_d = float(port_ret.mean()); sig_d = float(port_ret.std(ddof=0))
+    sharpe = (mu_d / sig_d * math.sqrt(252)) if sig_d > 0 else 0.0
+
     downside = port_ret.copy(); downside[downside > 0] = 0
-    dd_sigma = float(downside.std(ddof=0)); sortino = (mu_d / dd_sigma * math.sqrt(252)) if dd_sigma > 0 else 0.0
-    dd_series, curr_dd, max_dd = _drawdown(nav_norm); calmar = (_cagr(nav_norm) / abs(max_dd)) if max_dd < 0 else 0.0
-    gains = port_ret[port_ret > 0].sum(); losses = -port_ret[port_ret < 0].sum(); profit_factor = float(gains / losses) if losses > 0 else float("inf")
+    dd_sigma = float(downside.std(ddof=0))
+    sortino = (mu_d / dd_sigma * math.sqrt(252)) if dd_sigma > 0 else 0.0
+
+    dd_series, curr_dd, max_dd = _drawdown(nav_norm)
+    calmar = (_cagr(nav_norm) / abs(max_dd)) if max_dd < 0 else 0.0
+
+    gains = port_ret[port_ret > 0].sum(); losses = -port_ret[port_ret < 0].sum()
+    profit_factor = float(gains / losses) if losses > 0 else float("inf")
     win_rate = float((port_ret > 0).mean()); loss_rate = 1.0 - win_rate
+
     var95 = float(-np.percentile(port_ret.dropna(), 5)) if len(port_ret.dropna()) else 0.0
-    mret = (nav_norm.resample("M").last().pct_change()).dropna(); avg_monthly_ret = float(mret.mean()) if len(mret) else 0.0
-    cagr = _cagr(nav_norm); xirr = _xirr([nav.index[0], nav.index[-1]], [-init_cap, current_cap])
+    mret = (nav_norm.resample("M").last().pct_change()).dropna()
+    avg_monthly_ret = float(mret.mean()) if len(mret) else 0.0
+
+    cagr = _cagr(nav_norm)
+    xirr = _xirr([nav.index[0], nav.index[-1]], [-init_cap, current_cap])
     alpha, beta = _alpha_beta(port_ret.reindex_like(bench_ret), bench_ret)
+
     roll = {"1y": _rolling_returns(nav_norm, 1), "3y": _rolling_returns(nav_norm, 3), "5y": _rolling_returns(nav_norm, 5), "7y": _rolling_returns(nav_norm, 7)}
-    summary = {"Capital Invested": init_cap, "Current Capital": current_cap, "NAV": float(nav_norm.iloc[-1]), "CAGR": cagr, "XIRR": xirr, "Profit Factor": profit_factor, "VaR(95%)": var95, "WinPct": win_rate, "LossPct": loss_rate, "Average Monthly Return": avg_monthly_ret, "Current Drawdown": curr_dd, "Max Drawdown": max_dd, "Calmar Ratio": calmar, "Sharpe Ratio": sharpe, "Sortino Ratio": sortino, "Alpha": alpha, "Beta": beta}
+
+    summary = {
+        "Capital Invested": init_cap,
+        "Current Capital": current_cap,
+        "NAV": float(nav_norm.iloc[-1]),
+        "CAGR": cagr,
+        "XIRR": xirr,
+        "Profit Factor": profit_factor,
+        "VaR(95%)": var95,
+        "Win%": win_rate,
+        "Loss%": loss_rate,
+        "Average Monthly Return": avg_monthly_ret,
+        "Current Drawdown": curr_dd,
+        "Max Drawdown": max_dd,
+        "Calmar Ratio": calmar,
+        "Sharpe Ratio": sharpe,
+        "Sortino Ratio": sortino,
+        "Alpha": alpha,
+        "Beta": beta,
+    }
     return {"summary": summary, "nav": nav, "daily_returns": port_ret, "drawdown": dd_series, "rolling": roll}
 
 # ================= SIDEBAR =================
@@ -353,22 +428,28 @@ rb_map = {"Weekly": "W", "Fortnightly": "F", "Monthly": "M", "Quarterly": "Q"}
 
 load_btn = st.sidebar.button("Run Screener + Backtest", use_container_width=True)
 if "ran_once" not in st.session_state:
-    st.session_state.ran_once = True; load_btn = True
+    st.session_state.ran_once = True
+    load_btn = True
 
 # ================= ACTION =================
 if load_btn:
     try:
+        # 1) Universe + Prices
         uni_url = CSV_FILES[indices_universe]
         universe_df = load_universe_from_csv(uni_url)
         benchmark = BENCHMARKS[benchmark_key]
         tickers = universe_df["Symbol"].tolist()
+
         with st.spinner("Fetching EOD prices…"):
             raw = fetch_prices_batched(tickers, benchmark, period=period, interval="1d")
-        if raw.empty: st.stop()
+        if raw.empty:
+            st.stop()
 
-        bench_close = _pick_close(raw, benchmark).dropna(); last_dt = pd.to_datetime(bench_close.index.max()).strftime("%Y-%m-%d")
+        bench_close = _pick_close(raw, benchmark).dropna()
+        last_dt = pd.to_datetime(bench_close.index.max()).strftime("%Y-%m-%d")
         st.caption(f"Data as of: {last_dt} (IST)")
 
+        # 2) Screener
         df = build_table_dataframe(raw, benchmark, universe_df)
         ui_cols = ["S.No","Name","Industry","Return_6M","Rank_6M","Return_3M","Rank_3M","Return_1M","Rank_1M","RS-Ratio","RS-Momentum","Performance","Final_Rank","Position","Chart"]
         display_df = df[ui_cols].copy()
@@ -378,17 +459,31 @@ if load_btn:
         two_dec_cols = ["Return_6M","Return_3M","Return_1M","RS-Ratio","RS-Momentum"]
         for c in int_cols: display_df[c] = display_df[c].map(lambda v: "-" if pd.isna(v) else f"{int(v)}")
         for c in two_dec_cols: display_df[c] = display_df[c].map(lambda v: "-" if pd.isna(v) else f"{float(v):.2f}")
+
         st.subheader("Alpha Momentum Table")
-        table_html = style_rows(display_df.head(30)).to_html(escape=False)
+        table_html = style_rows(display_df.head(30)).to_html(escape=False)  # make links clickable
         st.markdown(f'<div class="pro-card">{table_html}</div>', unsafe_allow_html=True)
         st.caption(f"{len(df)} results • {indices_universe} • {benchmark_key} • 1d EOD • {period}")
 
+        # 3) Backtest using Top-N & Rebalance
         st.subheader("Backtest")
-        bt = backtest(raw_prices=raw, universe=universe_df["Symbol"].tolist(), benchmark=benchmark, top_n=int(top_n), rebalance=rb_map[rebalance], init_capital=1_000_000.0)
+        bt = backtest(
+            raw_prices=raw,
+            universe=universe_df["Symbol"].tolist(),
+            benchmark=benchmark,
+            top_n=int(top_n),
+            rebalance=rb_map[rebalance],
+            init_capital=1_000_000.0,
+        )
         metrics = build_metrics(bt)
-        nav = metrics["nav"]; draw = metrics["drawdown"); daily = metrics["daily_returns"]
-        roll = metrics["rolling"]; summary = metrics["summary"]
 
+        nav = metrics["nav"]
+        draw = metrics["drawdown"]
+        daily = metrics["daily_returns"]
+        roll = metrics["rolling"]
+        summary = metrics["summary"]
+
+        # Metric tiles
         cols = st.columns(4)
         as_pct = lambda x: f"{x*100:.2f}%"
         as_ratio = lambda x: f"{x:.2f}"
@@ -419,8 +514,8 @@ if load_btn:
             st.markdown('</div>', unsafe_allow_html=True)
 
         cols2 = st.columns(4)
-        with cols2[0]: st.metric("Win rate", as_pct(summary["WinPct"]))
-        with cols2[1]: st.metric("Loss rate", as_pct(summary["LossPct"]))
+        with cols2[0]: st.metric("Win%", as_pct(summary["Win%"]))
+        with cols2[1]: st.metric("Loss%", as_pct(summary["Loss%"]))
         with cols2[2]: st.metric("Profit Factor", as_ratio(summary["Profit Factor"]))
         with cols2[3]: st.metric("Alpha / Beta", f"{as_pct(summary['Alpha'])} / {summary['Beta']:.2f}")
 
@@ -451,7 +546,13 @@ if load_btn:
 
         st.markdown("---")
         ret_df = pd.DataFrame({"Date": nav.index, "NAV": nav.values, "DailyReturn": daily.values, "Drawdown": draw.reindex(nav.index).values})
-        st.download_button("Download NAV & Returns CSV", data=ret_df.to_csv(index=False).encode("utf-8"), file_name=f"backtest_top{top_n}_{rb_map[rebalance]}_{benchmark_key.replace(' ','')}.csv", mime="text/csv", use_container_width=True)
+        st.download_button(
+            "Download NAV & Returns CSV",
+            data=ret_df.to_csv(index=False).encode("utf-8"),
+            file_name=f"backtest_top{top_n}_{rb_map[rebalance]}_{benchmark_key.replace(' ','')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
 
     except Exception as e:
         st.error(str(e))
