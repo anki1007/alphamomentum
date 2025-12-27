@@ -1034,7 +1034,7 @@ def create_screener_chart(symbol: str) -> go.Figure:
         ), row=2, col=1)
         
         fig.update_layout(
-            title=dict(text=f'{symbol} - 6 Month Chart', font=dict(color='#ff6b35', size=16)),
+            title=dict(text=f'{symbol} - 5 Year Chart', font=dict(color='#ff6b35', size=16)),
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(26,26,46,0.8)',
             font=dict(color='#e0e0e0'),
@@ -2246,3 +2246,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
