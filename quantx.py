@@ -821,7 +821,7 @@ class MomentumShopBacktester:
 
 def fetch_nifty_momentum50_stocks():
     """Fetch current Nifty 500 Momentum 50 constituents"""
-    url = 'https://www.niftyindices.com/IndexConstituent/ind_nifty500Momentum50_list.csv'
+    url = 'https://nsearchives.nseindia.com/content/indices/ind_nifty200list.csv'
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
@@ -2246,4 +2246,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
