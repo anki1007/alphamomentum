@@ -23,7 +23,7 @@ import time
 
 # Page configuration
 st.set_page_config(
-    page_title="Momentum 50 Shop - Performance Dashboard",
+    page_title="Momentum 50 - Performance Dashboard",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -2246,6 +2246,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
