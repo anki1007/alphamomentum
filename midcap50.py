@@ -1631,11 +1631,11 @@ def main():
                 
                 display_df = filtered_df[display_cols].copy()
                 
-                styled_df = display_df.style.applymap(
+                styled_df = display_df.style.map(
                     highlight_signal, subset=['Signal']
-                ).applymap(
+                ).map(
                     highlight_deviation, subset=['Dev from 20DMA %']
-                ).applymap(
+                ).map(
                     highlight_change, subset=['Day Change %', 'From 52W High %']
                 ).format({
                     'Close': '₹{:.2f}',
@@ -2176,7 +2176,7 @@ def main():
                 
                 # Display trades
                 st.dataframe(
-                    trades_df.style.applymap(style_pnl, subset=['Pnl', 'NetPnl', 'Pnl%', 'NetPnl%']),
+                    trades_df.style.map(style_pnl, subset=['Pnl', 'NetPnl', 'Pnl%', 'NetPnl%']),
                     use_container_width=True,
                     height=400
                 )
