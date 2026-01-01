@@ -596,7 +596,8 @@ class MidcapShopBacktester:
         metrics['win_ratio'] = (metrics['winning_trades'] / metrics['total_trades'] * 100) if metrics['total_trades'] > 0 else 0
         
         # Financial metrics
-        metrics['actual_investment'] = trades_df['Capital'].sum()
+        metrics['total_turnover'] = trades_df['Capital'].sum()  # Cumulative capital deployed
+        metrics['actual_investment'] = self.initial_capital  # True out-of-pocket investment
         metrics['gross_pnl'] = trades_df['Pnl'].sum()
         metrics['total_brokerage'] = trades_df['Brokerage'].sum()
         metrics['net_pnl'] = trades_df['NetPnl'].sum()
@@ -1405,7 +1406,7 @@ def export_to_excel(trades_df: pd.DataFrame, metrics: Dict) -> bytes:
         metrics_data = {
             'Metric': [
                 'Total Trades', 'Winning Trades', 'Losing Trades', 'Win Ratio %',
-                'Initial Capital', 'Ending Balance', 'Gross PnL', 'Net PnL',
+                'Initial Capital', 'Total Turnover', 'Ending Balance', 'Gross PnL', 'Net PnL',
                 'Gross PnL %', 'Net PnL %', 'CAGR %', 'Max Drawdown %',
                 'Sharpe Ratio', 'Sortino Ratio', 'Calmar Ratio',
                 'Avg Holding Period', 'Total Brokerage'
@@ -1416,6 +1417,7 @@ def export_to_excel(trades_df: pd.DataFrame, metrics: Dict) -> bytes:
                 metrics.get('losing_trades', 0),
                 round(metrics.get('win_ratio', 0), 2),
                 round(metrics.get('actual_investment', 0), 2),
+                round(metrics.get('total_turnover', 0), 2),
                 round(metrics.get('ending_balance', 0), 2),
                 round(metrics.get('gross_pnl', 0), 2),
                 round(metrics.get('net_pnl', 0), 2),
@@ -1899,7 +1901,7 @@ def main():
             
             with cols[3]:
                 st.markdown(create_metric_card(
-                    "Actual Investment",
+                    "Initial Capital",
                     f"₹{metrics.get('actual_investment', 0):,.0f}"
                 ), unsafe_allow_html=True)
             
@@ -1984,6 +1986,27 @@ def main():
                 <div class="metric-card-secondary">
                     <div class="metric-label-secondary">Net PnL %</div>
                     <div class="{'metric-value-green' if net_pnl_pct >= 0 else 'metric-value-red'}">{net_pnl_pct:.1f}%</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Third row - Turnover info
+            st.markdown("<br>", unsafe_allow_html=True)
+            turn_col1, turn_col2, turn_col3 = st.columns([1, 1, 2])
+            
+            with turn_col1:
+                st.markdown(f"""
+                <div class="metric-card-secondary">
+                    <div class="metric-label-secondary">Total Turnover</div>
+                    <div class="metric-value">₹{metrics.get('total_turnover', 0):,.0f}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with turn_col2:
+                capital_turns = metrics.get('total_turnover', 0) / metrics.get('actual_investment', 1) if metrics.get('actual_investment', 0) > 0 else 0
+                st.markdown(f"""
+                <div class="metric-card-secondary">
+                    <div class="metric-label-secondary">Capital Turns</div>
+                    <div class="metric-value">{capital_turns:.1f}x</div>
                 </div>
                 """, unsafe_allow_html=True)
             
