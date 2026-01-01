@@ -20,6 +20,7 @@ import warnings
 import requests
 from io import StringIO
 import time
+import itertools
 
 # Page configuration
 st.set_page_config(
@@ -1471,7 +1472,7 @@ def main():
     """, unsafe_allow_html=True)
     
     # Main Tabs
-    tab1, tab2 = st.tabs(["🎯 Daily Screener", "📊 Backtest Analysis"])
+    tab1, tab2, tab3 = st.tabs(["🎯 Daily Screener", "📊 Backtest Analysis", "🔬 Parameter Optimization"])
     
     # ==================== TAB 1: DAILY SCREENER ====================
     with tab1:
@@ -2235,6 +2236,404 @@ def main():
                     if key in st.session_state:
                         del st.session_state[key]
                 st.rerun()
+    
+    # ==================== TAB 3: PARAMETER OPTIMIZATION ====================
+    with tab3:
+        st.markdown("### 🔬 Parameter Optimization")
+        st.markdown("*Grid search across position sizing modes and strategy parameters to find optimal configuration*")
+        
+        with st.sidebar:
+            st.markdown("### 🔬 Optimization Settings")
+            st.markdown("---")
+            
+            # Date range for optimization
+            st.markdown("**📅 Optimization Period**")
+            opt_col1, opt_col2 = st.columns(2)
+            with opt_col1:
+                opt_start = st.date_input("Start Date", value=date(2020, 1, 1), key="opt_start")
+            with opt_col2:
+                opt_end = st.date_input("End Date", value=date.today(), key="opt_end")
+            
+            st.markdown("---")
+            
+            # Capital for optimization
+            st.markdown("**💰 Capital Settings**")
+            opt_capital = st.number_input("Initial Capital (₹)", value=500000, step=50000, key="opt_capital")
+            opt_brokerage = st.number_input("Brokerage per Order (₹)", value=20.0, step=5.0, key="opt_brokerage")
+            
+            st.markdown("---")
+            
+            # Fixed parameters
+            st.markdown("**🎯 Fixed Parameters**")
+            opt_avg_trigger = st.slider("Avg Down Trigger %", 0.01, 0.10, 0.03, 0.01, key="opt_avg_trigger")
+            opt_max_pos = st.slider("Max Positions per Stock", 1, 10, 3, key="opt_max_pos")
+            opt_dma = st.slider("DMA Window", 10, 50, 20, key="opt_dma")
+            
+            st.markdown("---")
+            
+            # Run optimization button
+            run_optimization = st.button("🚀 Run Optimization", use_container_width=True, key="opt_run", type="primary")
+        
+        # Display parameter grid
+        st.markdown("#### 📋 Parameter Grid")
+        
+        with st.expander("View Parameter Combinations", expanded=True):
+            param_col1, param_col2, param_col3 = st.columns(3)
+            
+            with param_col1:
+                st.markdown("**Static Mode**")
+                st.markdown("Fresh Amount: ₹10,000 / ₹20,000")
+                st.markdown("Avg Amount: ₹10,000 / ₹20,000")
+                st.markdown("*4 combinations*")
+            
+            with param_col2:
+                st.markdown("**Dynamic Mode**")
+                st.markdown("Fresh %: 1.5% / 2% / 2.5%")
+                st.markdown("Avg %: 1.5% / 2% / 2.5%")
+                st.markdown("*9 combinations*")
+            
+            with param_col3:
+                st.markdown("**Divisor Mode**")
+                st.markdown("Fresh Div: 10 / 20 / 30 / 40")
+                st.markdown("Avg Div: 10 / 20 / 30 / 40")
+                st.markdown("*16 combinations*")
+            
+            st.markdown("**Target %:** 3% / 6% / 8%")
+            st.markdown(f"**Total Combinations:** (4 + 9 + 16) × 3 = **87 backtests**")
+        
+        if run_optimization or 'optimization_results' in st.session_state:
+            if run_optimization:
+                # Define parameter combinations as per user's screenshot
+                position_sizing_modes = ['static', 'dynamic', 'divisor']
+                static_params = list(itertools.product([10000, 20000], [10000, 20000]))
+                dynamic_params = list(itertools.product([0.015, 0.02, 0.025], [0.015, 0.02, 0.025]))
+                divisor_params = list(itertools.product([10.0, 20.0, 30.0, 40.0], [10.0, 20.0, 30.0, 40.0]))
+                target_params = [0.03, 0.06, 0.08]
+                
+                # Build all combinations
+                all_combinations = []
+                
+                # Static combinations
+                for (fresh_amt, avg_amt) in static_params:
+                    for target in target_params:
+                        all_combinations.append({
+                            'mode': 'static',
+                            'fresh_static_amt': fresh_amt,
+                            'avg_static_amt': avg_amt,
+                            'fresh_cash_pct': 0,
+                            'avg_cash_pct': 0,
+                            'fresh_trade_divisor': 10,
+                            'avg_trade_divisor': 10,
+                            'target_pct': target
+                        })
+                
+                # Dynamic combinations
+                for (fresh_pct, avg_pct) in dynamic_params:
+                    for target in target_params:
+                        all_combinations.append({
+                            'mode': 'dynamic',
+                            'fresh_static_amt': 0,
+                            'avg_static_amt': 0,
+                            'fresh_cash_pct': fresh_pct,
+                            'avg_cash_pct': avg_pct,
+                            'fresh_trade_divisor': 10,
+                            'avg_trade_divisor': 10,
+                            'target_pct': target
+                        })
+                
+                # Divisor combinations
+                for (fresh_div, avg_div) in divisor_params:
+                    for target in target_params:
+                        all_combinations.append({
+                            'mode': 'divisor',
+                            'fresh_static_amt': 0,
+                            'avg_static_amt': 0,
+                            'fresh_cash_pct': 0,
+                            'avg_cash_pct': 0,
+                            'fresh_trade_divisor': fresh_div,
+                            'avg_trade_divisor': avg_div,
+                            'target_pct': target
+                        })
+                
+                total_combinations = len(all_combinations)
+                st.info(f"Running {total_combinations} backtests... This may take a while.")
+                
+                # Fetch instruments once
+                with st.spinner("Fetching stock list..."):
+                    instruments = fetch_nifty_Midcap50_stocks()
+                
+                # Progress tracking
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                results_placeholder = st.empty()
+                
+                optimization_results = []
+                
+                # Load data once (shared across all backtests)
+                status_text.text("Loading market data (one-time)...")
+                
+                try:
+                    # Create a temporary backtester just to load data
+                    temp_backtester = MidcapShopBacktester(
+                        instruments=instruments,
+                        start_date=opt_start,
+                        end_date=opt_end,
+                        position_sizing_mode='static',
+                        fresh_static_amt=20000,
+                        avg_static_amt=20000,
+                        initial_capital=opt_capital,
+                        target_pct=0.05,
+                        avg_trigger_pct=opt_avg_trigger,
+                        brokerage_per_order=opt_brokerage,
+                        dma_window=opt_dma,
+                        max_avg=opt_max_pos
+                    )
+                    temp_backtester.load_data_from_yfinance()
+                    shared_data = temp_backtester.data
+                    
+                except Exception as e:
+                    st.error(f"Error loading data: {str(e)}")
+                    st.stop()
+                
+                # Run all combinations
+                for i, params in enumerate(all_combinations):
+                    progress = (i + 1) / total_combinations
+                    progress_bar.progress(progress)
+                    
+                    param_str = f"{params['mode']}"
+                    if params['mode'] == 'static':
+                        param_str += f" (₹{params['fresh_static_amt']:,}/₹{params['avg_static_amt']:,})"
+                    elif params['mode'] == 'dynamic':
+                        param_str += f" ({params['fresh_cash_pct']*100:.1f}%/{params['avg_cash_pct']*100:.1f}%)"
+                    else:
+                        param_str += f" ({params['fresh_trade_divisor']:.0f}/{params['avg_trade_divisor']:.0f})"
+                    param_str += f" T:{params['target_pct']*100:.0f}%"
+                    
+                    status_text.text(f"[{i+1}/{total_combinations}] Testing: {param_str}")
+                    
+                    try:
+                        backtester = MidcapShopBacktester(
+                            instruments=instruments,
+                            start_date=opt_start,
+                            end_date=opt_end,
+                            position_sizing_mode=params['mode'],
+                            fresh_static_amt=params['fresh_static_amt'],
+                            avg_static_amt=params['avg_static_amt'],
+                            fresh_cash_pct=params['fresh_cash_pct'],
+                            avg_cash_pct=params['avg_cash_pct'],
+                            fresh_trade_divisor=params['fresh_trade_divisor'],
+                            avg_trade_divisor=params['avg_trade_divisor'],
+                            initial_capital=opt_capital,
+                            target_pct=params['target_pct'],
+                            avg_trigger_pct=opt_avg_trigger,
+                            brokerage_per_order=opt_brokerage,
+                            dma_window=opt_dma,
+                            max_avg=opt_max_pos
+                        )
+                        
+                        # Use shared data instead of reloading
+                        backtester.data = copy.deepcopy(shared_data)
+                        
+                        # Run backtest
+                        trades_df = backtester.run_backtest()
+                        metrics = backtester.compute_all_metrics(trades_df)
+                        
+                        # Store results
+                        result = {
+                            'Mode': params['mode'].capitalize(),
+                            'Fresh Param': params['fresh_static_amt'] if params['mode'] == 'static' 
+                                          else (f"{params['fresh_cash_pct']*100:.1f}%" if params['mode'] == 'dynamic' 
+                                          else params['fresh_trade_divisor']),
+                            'Avg Param': params['avg_static_amt'] if params['mode'] == 'static'
+                                        else (f"{params['avg_cash_pct']*100:.1f}%" if params['mode'] == 'dynamic'
+                                        else params['avg_trade_divisor']),
+                            'Target %': f"{params['target_pct']*100:.0f}%",
+                            'Total Trades': metrics.get('total_trades', 0),
+                            'Win Ratio %': round(metrics.get('win_ratio', 0), 1),
+                            'Net PnL': round(metrics.get('net_pnl', 0), 0),
+                            'Net PnL %': round(metrics.get('net_pnl_pct', 0), 2),
+                            'CAGR %': round(metrics.get('cagr', 0), 2),
+                            'Max DD %': round(abs(metrics.get('max_drawdown', 0)), 2),
+                            'Sharpe': round(metrics.get('sharpe', 0), 2),
+                            'Sortino': round(metrics.get('sortino', 0), 2),
+                            'Calmar': round(metrics.get('calmar', 0), 2),
+                            'Profit Factor': round(metrics.get('profit_factor', 0), 2) if metrics.get('profit_factor', 0) != float('inf') else 999.99
+                        }
+                        optimization_results.append(result)
+                        
+                    except Exception as e:
+                        # Log error but continue
+                        optimization_results.append({
+                            'Mode': params['mode'].capitalize(),
+                            'Fresh Param': str(params.get('fresh_static_amt') or params.get('fresh_cash_pct') or params.get('fresh_trade_divisor')),
+                            'Avg Param': str(params.get('avg_static_amt') or params.get('avg_cash_pct') or params.get('avg_trade_divisor')),
+                            'Target %': f"{params['target_pct']*100:.0f}%",
+                            'Total Trades': 0,
+                            'Win Ratio %': 0,
+                            'Net PnL': 0,
+                            'Net PnL %': 0,
+                            'CAGR %': 0,
+                            'Max DD %': 0,
+                            'Sharpe': 0,
+                            'Sortino': 0,
+                            'Calmar': 0,
+                            'Profit Factor': 0
+                        })
+                
+                progress_bar.progress(100)
+                status_text.text("✅ Optimization complete!")
+                time.sleep(1)
+                progress_bar.empty()
+                status_text.empty()
+                
+                # Store results
+                st.session_state['optimization_results'] = optimization_results
+            
+            # Display results
+            results = st.session_state.get('optimization_results', [])
+            
+            if results:
+                results_df = pd.DataFrame(results)
+                
+                # Summary metrics
+                st.markdown("#### 🏆 Top Performers")
+                
+                # Best by different metrics
+                best_cols = st.columns(4)
+                
+                with best_cols[0]:
+                    best_cagr = results_df.loc[results_df['CAGR %'].idxmax()]
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <div class="metric-label">Best CAGR</div>
+                        <div class="metric-value-green">{best_cagr['CAGR %']:.2f}%</div>
+                        <div style="color: #888; font-size: 11px;">{best_cagr['Mode']} | T:{best_cagr['Target %']}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with best_cols[1]:
+                    best_sharpe = results_df.loc[results_df['Sharpe'].idxmax()]
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <div class="metric-label">Best Sharpe</div>
+                        <div class="metric-value-green">{best_sharpe['Sharpe']:.2f}</div>
+                        <div style="color: #888; font-size: 11px;">{best_sharpe['Mode']} | T:{best_sharpe['Target %']}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with best_cols[2]:
+                    best_calmar = results_df.loc[results_df['Calmar'].idxmax()]
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <div class="metric-label">Best Calmar</div>
+                        <div class="metric-value-green">{best_calmar['Calmar']:.2f}</div>
+                        <div style="color: #888; font-size: 11px;">{best_calmar['Mode']} | T:{best_calmar['Target %']}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with best_cols[3]:
+                    lowest_dd = results_df.loc[results_df['Max DD %'].idxmin()]
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <div class="metric-label">Lowest Max DD</div>
+                        <div class="metric-value-green">{lowest_dd['Max DD %']:.2f}%</div>
+                        <div style="color: #888; font-size: 11px;">{lowest_dd['Mode']} | T:{lowest_dd['Target %']}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                st.markdown("<div class='custom-divider'></div>", unsafe_allow_html=True)
+                
+                # Full results table
+                st.markdown("#### 📊 All Results (Sorted by CAGR)")
+                
+                # Sort by CAGR descending
+                results_df_sorted = results_df.sort_values('CAGR %', ascending=False).reset_index(drop=True)
+                results_df_sorted.index = results_df_sorted.index + 1  # Start from 1
+                
+                # Style the dataframe
+                def highlight_top_values(s, n=5):
+                    """Highlight top n values in a column"""
+                    is_top = s.nlargest(n).index
+                    return ['background-color: rgba(0, 255, 136, 0.2)' if i in is_top else '' for i in s.index]
+                
+                styled_results = results_df_sorted.style.apply(
+                    highlight_top_values, subset=['CAGR %', 'Sharpe', 'Calmar', 'Net PnL %']
+                ).format({
+                    'Net PnL': '₹{:,.0f}',
+                    'Net PnL %': '{:.2f}%',
+                    'CAGR %': '{:.2f}%',
+                    'Max DD %': '{:.2f}%',
+                    'Win Ratio %': '{:.1f}%'
+                })
+                
+                st.dataframe(styled_results, use_container_width=True, height=500)
+                
+                # Group analysis
+                st.markdown("<div class='custom-divider'></div>", unsafe_allow_html=True)
+                st.markdown("#### 📈 Analysis by Position Sizing Mode")
+                
+                mode_summary = results_df.groupby('Mode').agg({
+                    'CAGR %': ['mean', 'max', 'std'],
+                    'Sharpe': ['mean', 'max'],
+                    'Max DD %': ['mean', 'min'],
+                    'Total Trades': 'mean'
+                }).round(2)
+                mode_summary.columns = ['Avg CAGR %', 'Max CAGR %', 'CAGR Std', 
+                                       'Avg Sharpe', 'Max Sharpe',
+                                       'Avg Max DD %', 'Min Max DD %',
+                                       'Avg Trades']
+                st.dataframe(mode_summary, use_container_width=True)
+                
+                # Target analysis
+                st.markdown("#### 🎯 Analysis by Target %")
+                target_summary = results_df.groupby('Target %').agg({
+                    'CAGR %': ['mean', 'max'],
+                    'Sharpe': ['mean', 'max'],
+                    'Max DD %': ['mean', 'min'],
+                    'Total Trades': 'mean'
+                }).round(2)
+                target_summary.columns = ['Avg CAGR %', 'Max CAGR %',
+                                         'Avg Sharpe', 'Max Sharpe',
+                                         'Avg Max DD %', 'Min Max DD %',
+                                         'Avg Trades']
+                st.dataframe(target_summary, use_container_width=True)
+                
+                # Export
+                st.markdown("<br>", unsafe_allow_html=True)
+                csv_results = results_df_sorted.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Optimization Results (CSV)",
+                    data=csv_results,
+                    file_name=f"Midcap50_optimization_{date.today()}.csv",
+                    mime="text/csv"
+                )
+                
+                # Clear results button
+                if st.button("🔄 Clear Results & Re-run", key="opt_clear"):
+                    if 'optimization_results' in st.session_state:
+                        del st.session_state['optimization_results']
+                    st.rerun()
+        else:
+            # Welcome message
+            st.markdown("""
+            <div style="text-align: center; padding: 50px;">
+                <h3 style="color: #ff6b35;">👆 Click "Run Optimization" in the sidebar to start</h3>
+                <p style="color: #888;">
+                    The optimizer will run 87 backtests across different position sizing modes
+                    and target percentages to find the optimal parameters for the Midcap 50 strategy.
+                </p>
+                <div style="margin-top: 30px; padding: 20px; background: linear-gradient(145deg, #1e1e2f, #2d2d44); border-radius: 10px; border: 1px solid #ff6b35;">
+                    <h4 style="color: #00d4ff;">Parameter Ranges:</h4>
+                    <p style="color: #e0e0e0; text-align: left;">
+                        <b>Static:</b> Fresh ₹10K/₹20K × Avg ₹10K/₹20K = 4 combos<br>
+                        <b>Dynamic:</b> Fresh 1.5%/2%/2.5% × Avg 1.5%/2%/2.5% = 9 combos<br>
+                        <b>Divisor:</b> Fresh 10/20/30/40 × Avg 10/20/30/40 = 16 combos<br>
+                        <b>Target:</b> 3% / 6% / 8%<br><br>
+                        <b>Total:</b> (4 + 9 + 16) × 3 = <span style="color: #00ff88; font-weight: bold;">87 backtests</span>
+                    </p>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
     
     # Footer
     st.markdown("""
