@@ -1046,8 +1046,7 @@ def create_monthly_returns_heatmap(trades_df: pd.DataFrame) -> go.Figure:
         hoverongaps=False,
         showscale=True,
         colorbar=dict(
-            title='PnL (₹)',
-            titlefont=dict(family='JetBrains Mono', size=10),
+            title=dict(text='PnL (₹)', font=dict(family='JetBrains Mono', size=10)),
             tickfont=dict(family='JetBrains Mono', size=9)
         )
     ))
@@ -1092,8 +1091,7 @@ def create_efficient_frontier_plot(ef_engine: EfficientFrontierEngine) -> go.Fig
             colorscale='Viridis',
             showscale=True,
             colorbar=dict(
-                title='Sharpe',
-                titlefont=dict(family='JetBrains Mono', size=10),
+                title=dict(text='Sharpe', font=dict(family='JetBrains Mono', size=10)),
                 tickfont=dict(family='JetBrains Mono', size=9)
             ),
             opacity=0.6
@@ -1139,15 +1137,13 @@ def create_efficient_frontier_plot(ef_engine: EfficientFrontierEngine) -> go.Fig
             font=dict(family='JetBrains Mono', size=14, color='#00d4ff')
         ),
         xaxis=dict(
-            title='Volatility (%)',
+            title=dict(text='Volatility (%)', font=dict(family='JetBrains Mono')),
             gridcolor='rgba(30, 41, 59, 0.5)',
-            titlefont=dict(family='JetBrains Mono'),
             tickfont=dict(family='JetBrains Mono')
         ),
         yaxis=dict(
-            title='Expected Return (%)',
+            title=dict(text='Expected Return (%)', font=dict(family='JetBrains Mono')),
             gridcolor='rgba(30, 41, 59, 0.5)',
-            titlefont=dict(family='JetBrains Mono'),
             tickfont=dict(family='JetBrains Mono')
         ),
         legend=dict(
