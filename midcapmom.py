@@ -317,6 +317,7 @@ class MidcapShopBacktester:
         self._completed_trades: List[Dict] = []
         self.realized_pnl_by_date: Dict[pd.Timestamp, float] = {}
         self.data: Dict[str, pd.DataFrame] = {}
+        self.benchmark_data: Optional[pd.DataFrame] = None
         self._fresh_buy = False
         self.cashflow_ledger: List[Tuple[date, float]] = []
         self.equity_curve_data: List[Dict] = []
@@ -328,6 +329,33 @@ class MidcapShopBacktester:
         
         # Need 252 + slope_lookback days of history for trend filter
         lookback_days = 400 if self.use_trend_filter else 150
+        
+        # Load benchmark (Nifty 50) first for RS calculation
+        if self.use_trend_filter:
+            try:
+                bench_df = yf.download(
+                    "^NSEI",
+                    start=self.start_date - timedelta(days=lookback_days),
+                    end=self.end_date + timedelta(days=1),
+                    auto_adjust=True,
+                    interval="1d",
+                    progress=False,
+                    multi_level_index=None
+                )
+                if not bench_df.empty:
+                    bench_df.reset_index(inplace=True)
+                    bench_df = bench_df[['Date', 'Close']]
+                    bench_df.set_index("Date", inplace=True)
+                    bench_df = bench_df.sort_index()
+                    bench_df.columns = ['Bench_Close']
+                    self.benchmark_data = bench_df
+                else:
+                    self.benchmark_data = None
+            except Exception as e:
+                warnings.warn(f"Could not load benchmark: {e}")
+                self.benchmark_data = None
+        else:
+            self.benchmark_data = None
         
         total = len(self.instruments)
         for i, sym in enumerate(self.instruments):
@@ -442,12 +470,27 @@ class MidcapShopBacktester:
                 annualized_slope = df["252DMA_slope_pct"] * (252 / self.slope_lookback)
                 df["252DMA_angle"] = np.degrees(np.arctan(annualized_slope / 100))
                 
-                # Trend valid: 63DMA > 126DMA > 252DMA AND slope in range
+                # Calculate 252-day Relative Strength vs Nifty
+                # RS = Stock 252d return - Benchmark 252d return
+                df["stock_252d_return"] = df["Close"].pct_change(periods=252) * 100
+                
+                if self.benchmark_data is not None and not self.benchmark_data.empty:
+                    # Merge benchmark data
+                    df = df.join(self.benchmark_data, how='left')
+                    df["Bench_Close"] = df["Bench_Close"].ffill()
+                    df["bench_252d_return"] = df["Bench_Close"].pct_change(periods=252) * 100
+                    df["RS_252"] = df["stock_252d_return"] - df["bench_252d_return"]
+                else:
+                    # If no benchmark, use absolute return (RS = stock return)
+                    df["RS_252"] = df["stock_252d_return"]
+                
+                # Trend valid: 63DMA > 126DMA > 252DMA AND slope in range AND RS > 0
                 df["trend_valid"] = (
                     (df["63DMA"] > df["126DMA"]) & 
                     (df["126DMA"] > df["252DMA"]) &
                     (df["252DMA_angle"] >= self.min_slope_angle) &
-                    (df["252DMA_angle"] <= self.max_slope_angle)
+                    (df["252DMA_angle"] <= self.max_slope_angle) &
+                    (df["RS_252"] > 0)
                 )
             else:
                 df["trend_valid"] = True  # No filter, always valid
@@ -916,6 +959,26 @@ def run_daily_screener(symbols: List[str], progress_callback=None) -> pd.DataFra
     end_date = date.today()
     start_date = end_date - timedelta(days=400)  # Need 252 days + buffer for trend filter
     
+    # Load Nifty 50 benchmark for RS calculation
+    try:
+        bench_df = yf.download(
+            "^NSEI",
+            start=start_date,
+            end=end_date + timedelta(days=1),
+            auto_adjust=True,
+            interval="1d",
+            progress=False,
+            multi_level_index=None
+        )
+        if not bench_df.empty:
+            bench_df = bench_df.sort_index()
+            bench_df['bench_252d_return'] = bench_df['Close'].pct_change(periods=252) * 100
+            latest_bench_return = float(bench_df['bench_252d_return'].iloc[-1]) if not pd.isna(bench_df['bench_252d_return'].iloc[-1]) else 0
+        else:
+            latest_bench_return = 0
+    except:
+        latest_bench_return = 0
+    
     total = len(symbols)
     
     for i, symbol in enumerate(symbols):
@@ -946,6 +1009,9 @@ def run_daily_screener(symbols: List[str], progress_callback=None) -> pd.DataFra
             df['252DMA'] = df['Close'].rolling(window=252).mean()
             df['Volume_Avg'] = df['Volume'].rolling(window=20).mean()
             
+            # Calculate 252-day return for RS
+            df['stock_252d_return'] = df['Close'].pct_change(periods=252) * 100
+            
             # Calculate 252DMA slope
             slope_lookback = 20
             df['252DMA_prev'] = df['252DMA'].shift(slope_lookback)
@@ -971,8 +1037,12 @@ def run_daily_screener(symbols: List[str], progress_callback=None) -> pd.DataFra
             latest_dma126 = float(latest['126DMA']) if not pd.isna(latest['126DMA']) else None
             latest_dma252 = float(latest['252DMA']) if not pd.isna(latest['252DMA']) else None
             latest_angle = float(latest['252DMA_angle']) if not pd.isna(latest['252DMA_angle']) else None
+            latest_stock_return = float(latest['stock_252d_return']) if not pd.isna(latest['stock_252d_return']) else None
             avg_volume = float(latest['Volume_Avg'])
             prev_close = float(prev['Close'])
+            
+            # Calculate RS (Relative Strength vs Nifty)
+            rs_252 = (latest_stock_return - latest_bench_return) if latest_stock_return is not None else None
             
             if pd.isna(latest_dma20):
                 continue
@@ -990,14 +1060,19 @@ def run_daily_screener(symbols: List[str], progress_callback=None) -> pd.DataFra
             from_52w_high = ((latest_close - high_52w) / high_52w) * 100
             from_52w_low = ((latest_close - low_52w) / low_52w) * 100
             
-            # Trend filter check: 63DMA > 126DMA > 252DMA and slope 5-30°
+            # Trend filter check: 63DMA > 126DMA > 252DMA and slope 5-30° and RS > 0
             trend_aligned = False
             trend_status = "❌ No Trend"
+            rs_status = "❌" if rs_252 is None or rs_252 <= 0 else "✅"
+            
             if latest_dma63 and latest_dma126 and latest_dma252:
                 if latest_dma63 > latest_dma126 > latest_dma252:
                     if latest_angle and 5 <= latest_angle <= 30:
-                        trend_aligned = True
-                        trend_status = "✅ Uptrend"
+                        if rs_252 is not None and rs_252 > 0:
+                            trend_aligned = True
+                            trend_status = "✅ Uptrend"
+                        else:
+                            trend_status = "📈 Weak RS"
                     elif latest_angle and latest_angle > 30:
                         trend_status = "⚠️ Parabolic"
                     elif latest_angle and latest_angle < 5:
@@ -1037,6 +1112,8 @@ def run_daily_screener(symbols: List[str], progress_callback=None) -> pd.DataFra
                 '126 DMA': round(latest_dma126, 2) if latest_dma126 else '-',
                 '252 DMA': round(latest_dma252, 2) if latest_dma252 else '-',
                 '252 Slope°': round(latest_angle, 1) if latest_angle else '-',
+                'RS 252': round(rs_252, 1) if rs_252 is not None else '-',
+                'RS Status': rs_status,
                 'Trend': trend_status,
                 'Volume': int(latest_volume),
                 'Avg Volume': int(avg_volume),
@@ -1763,9 +1840,19 @@ def main():
                         return 'background-color: rgba(255, 71, 87, 0.2); color: #ff4757'
                     return ''
                 
+                def highlight_rs(val):
+                    try:
+                        if float(val) > 0:
+                            return 'color: #00ff88; font-weight: bold'
+                        elif float(val) < 0:
+                            return 'color: #ff4757'
+                    except:
+                        pass
+                    return ''
+                
                 # Select columns to display
                 display_cols = ['Symbol', 'Close', 'Day Change %', '20 DMA', 'Dev from 20DMA %', 
-                               '252 Slope°', 'Trend', 'Vol Ratio', 'From 52W High %', 'Signal']
+                               '252 Slope°', 'RS 252', 'Trend', 'Vol Ratio', 'Signal']
                 
                 display_df = filtered_df[display_cols].copy()
                 
@@ -1774,15 +1861,16 @@ def main():
                 ).map(
                     highlight_deviation, subset=['Dev from 20DMA %']
                 ).map(
-                    highlight_change, subset=['Day Change %', 'From 52W High %']
+                    highlight_change, subset=['Day Change %']
                 ).map(
                     highlight_trend, subset=['Trend']
+                ).map(
+                    highlight_rs, subset=['RS 252']
                 ).format({
                     'Close': '₹{:.2f}',
                     '20 DMA': '₹{:.2f}',
                     'Day Change %': '{:.2f}%',
                     'Dev from 20DMA %': '{:.2f}%',
-                    'From 52W High %': '{:.2f}%',
                     'Vol Ratio': '{:.2f}x'
                 })
                 
@@ -1808,6 +1896,9 @@ def main():
                         slope_val = stock_data.get('252 Slope°', '-')
                         slope_display = f"{slope_val}°" if slope_val != '-' else '-'
                         trend_val = stock_data.get('Trend', '-')
+                        rs_val = stock_data.get('RS 252', '-')
+                        rs_display = f"{rs_val}" if rs_val != '-' else '-'
+                        rs_color = '#00ff88' if rs_val != '-' and float(rs_val) > 0 else '#ff4757'
                         
                         st.markdown(f"""
                         <div style="background: linear-gradient(145deg, #1e1e2f, #2d2d44); padding: 15px; border-radius: 10px; border: 1px solid #ff6b35;">
@@ -1819,6 +1910,7 @@ def main():
                             <p><span style="color: #888;">Dev from 20DMA:</span> <span style="color: {'#00ff88' if stock_data['Dev from 20DMA %'] < -3 else '#ffaa00'}; font-weight: bold;">{stock_data['Dev from 20DMA %']:.2f}%</span></p>
                             <hr style="border-color: #333;">
                             <p><span style="color: #888;">252 DMA Slope:</span> <span style="color: #00d4ff;">{slope_display}</span></p>
+                            <p><span style="color: #888;">RS 252 (vs Nifty):</span> <span style="color: {rs_color}; font-weight: bold;">{rs_display}</span></p>
                             <p><span style="color: #888;">Trend Status:</span> <span style="font-weight: bold;">{trend_val}</span></p>
                             <hr style="border-color: #333;">
                             <p><span style="color: #888;">Vol Ratio:</span> <span style="color: #fff;">{stock_data['Vol Ratio']:.2f}x</span></p>
@@ -1942,10 +2034,10 @@ def main():
             # Trend Filter
             st.markdown("**📈 Trend Filter**")
             use_trend_filter = st.checkbox("Enable Trend Filter", value=False, key="bt_trend_filter",
-                                          help="63DMA > 126DMA > 252DMA with slope constraint")
+                                          help="63DMA > 126DMA > 252DMA + slope 5-30° + RS > 0")
             
             if use_trend_filter:
-                st.markdown("*MA Alignment: 63 > 126 > 252*")
+                st.markdown("*MA Alignment + RS > 0 (vs Nifty)*")
                 slope_lookback = st.slider("Slope Lookback (days)", 10, 30, 20, key="bt_slope_lookback",
                                           help="Days to calculate 252DMA slope")
                 min_slope = st.slider("Min Slope Angle (°)", 0.0, 15.0, 5.0, 1.0, key="bt_min_slope",
@@ -2464,8 +2556,9 @@ def main():
             # Trend Filter for optimization
             st.markdown("**📈 Trend Filter**")
             opt_use_trend = st.checkbox("Enable Trend Filter", value=False, key="opt_trend_filter",
-                                       help="63DMA > 126DMA > 252DMA with slope")
+                                       help="63DMA > 126DMA > 252DMA + slope + RS > 0")
             if opt_use_trend:
+                st.markdown("*+ RS > 0 (vs Nifty)*")
                 opt_slope_lookback = st.slider("Slope Lookback", 10, 30, 20, key="opt_slope_lookback")
                 opt_min_slope = st.slider("Min Slope (°)", 0.0, 15.0, 5.0, 1.0, key="opt_min_slope")
                 opt_max_slope = st.slider("Max Slope (°)", 15.0, 45.0, 30.0, 1.0, key="opt_max_slope")
