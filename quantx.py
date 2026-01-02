@@ -1,5 +1,5 @@
 """
-Momentum 50 Strategy - Bloomberg-Style Performance Dashboard
+Nifty 500 Momentum 50 Strategy - Bloomberg-Style Performance Dashboard
 Stallions Algorithmic Trading Platform
 """
 
@@ -23,7 +23,7 @@ import time
 
 # Page configuration
 st.set_page_config(
-    page_title="Momentum 50 - Performance Dashboard",
+    page_title="Nifty 500 Momentum 50 - Performance Dashboard",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -256,7 +256,7 @@ class Position:
         return sum(l.buy_brokerage for l in self.lots)
 
 
-class MomentumShopBacktester:
+class Nifty500Momentum50:
     """Complete backtester with all metrics calculation"""
     
     def __init__(
@@ -265,16 +265,16 @@ class MomentumShopBacktester:
         start_date: date,
         end_date: date,
         position_sizing_mode: str,
-        fresh_static_amt: float = 0.0,
-        avg_static_amt: float = 0.0,
-        fresh_cash_pct: float = 0.0,
-        avg_cash_pct: float = 0.0,
-        fresh_trade_divisor: Optional[float] = None,
-        avg_trade_divisor: Optional[float] = None,
-        initial_capital: float = 400000.0,
-        target_pct: float = 0.05,
-        avg_trigger_pct: float = 0.03,
-        brokerage_per_order: float = 40.0,
+        fresh_static_amt: float = 10000.0,
+        avg_static_amt: float = 20000.0,
+        fresh_cash_pct: float = 0.04,
+        avg_cash_pct: float = 0.06,
+        fresh_trade_divisor: Optional[float] = 30.0,
+        avg_trade_divisor: Optional[float] = 30.0,
+        initial_capital: float = 500000.0,
+        target_pct: float = 0.08,
+        avg_trigger_pct: float = 0.05,
+        brokerage_per_order: float = 20.0,
         dma_window: int = 20,
         max_avg: int = 3,
     ):
@@ -1465,7 +1465,7 @@ def main():
             </div>
         </div>
         <div style="text-align: right;">
-            <div style="font-size: 14px; color: #00d4ff;">Momentum 50 Strategy</div>
+            <div style="font-size: 14px; color: #00d4ff;">Nifty 500 Momentum 50 Strategy</div>
         </div>
     </div>
     <div class="custom-divider"></div>
@@ -1814,7 +1814,7 @@ def main():
                     status_text.text(msg)
                 
                 try:
-                    backtester = MomentumShopBacktester(
+                    backtester = Nifty500Momentum50(
                         instruments=instruments,
                         start_date=start_date,
                         end_date=end_date,
@@ -1872,7 +1872,7 @@ def main():
                 return
             
             # Strategy selector (for future multi-strategy support)
-            st.selectbox("Choose Strategy", ["Momentum 50 Top"], key="strategy_select")
+            st.selectbox("Choose Strategy", ["Nifty 500 Momentum 50"], key="strategy_select")
             
             # Top metrics row
             st.markdown("### 📊 Key Performance Metrics")
