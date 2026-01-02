@@ -26,7 +26,7 @@ warnings.filterwarnings('ignore')
 # PAGE CONFIG
 # =============================================================================
 st.set_page_config(
-    page_title="QTF Dual Momentum Platform",
+    page_title="Dual Momentum",
     page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -840,8 +840,8 @@ def main():
     # Header
     st.markdown("""
     <div class="main-header">
-        <div class="header-title">QTF PLATFORM</div>
-        <div class="header-subtitle">DUAL MOMENTUM • INSTITUTIONAL GRADE • MON100 | NIFTYBEES | GOLDBEES</div>
+        <div class="header-title">ADAPTIVE ASSET ALLOCATION</div>
+        <div class="header-subtitle">DUAL MOMENTUM • INSTITUTIONAL GRADE • NIFTYBEES | GOLDBEES | MON100</div>
     </div>
     """, unsafe_allow_html=True)
     
