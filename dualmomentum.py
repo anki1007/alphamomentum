@@ -441,7 +441,7 @@ def main():
         # Date Range
         col1, col2 = st.columns(2)
         with col1:
-            start_date = st.date_input("Start Date", datetime(2014, 1, 1))
+            start_date = st.date_input("Start Date", datetime(2010, 1, 1))
         with col2:
             end_date = st.date_input("End Date", datetime.now())
         
