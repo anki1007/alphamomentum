@@ -786,6 +786,26 @@ class Nifty500Momentum50:
                 yoy_returns[year] = ((year_data.iloc[-1] - year_data.iloc[0]) / year_data.iloc[0]) * 100
         metrics['yoy_returns'] = yoy_returns
         
+        # Benchmark YoY returns
+        benchmark_yoy_returns = {}
+        if benchmark_data is not None and not benchmark_data.empty:
+            try:
+                # Handle multi-level columns
+                bench_df = benchmark_data.copy()
+                if isinstance(bench_df.columns, pd.MultiIndex):
+                    bench_df.columns = bench_df.columns.get_level_values(0)
+                
+                bench_close = bench_df['Close'] if 'Close' in bench_df.columns else bench_df.iloc[:, 0]
+                bench_close = bench_close.dropna()
+                
+                for year in bench_close.index.year.unique():
+                    year_data = bench_close[bench_close.index.year == year]
+                    if len(year_data) > 1:
+                        benchmark_yoy_returns[year] = ((year_data.iloc[-1] - year_data.iloc[0]) / year_data.iloc[0]) * 100
+            except Exception as e:
+                warnings.warn(f"Could not calculate benchmark YoY returns: {e}")
+        metrics['benchmark_yoy_returns'] = benchmark_yoy_returns
+        
         # Daily portfolio values for chart
         if self.daily_portfolio_values:
             portfolio_series = pd.Series(self.daily_portfolio_values).sort_index()
@@ -1063,10 +1083,21 @@ def fetch_benchmark_data(start_date: date, end_date: date) -> pd.DataFrame:
             "^NSEI",
             start=start_date,
             end=end_date + timedelta(days=1),
-            progress=False
+            progress=False,
+            auto_adjust=True
         )
+        
+        # Handle multi-level columns from newer yfinance
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        
+        # Ensure we have Close column
+        if df.empty:
+            return pd.DataFrame()
+            
         return df
-    except:
+    except Exception as e:
+        warnings.warn(f"Could not fetch benchmark data: {e}")
         return pd.DataFrame()
 
 
@@ -1085,6 +1116,7 @@ def create_equity_curve_chart(metrics: Dict, benchmark_df: pd.DataFrame = None) 
     fig = go.Figure()
     
     equity = metrics.get('equity_curve', pd.Series())
+    initial_capital = equity.iloc[0] if len(equity) > 0 else 500000
     
     if len(equity) > 0:
         fig.add_trace(go.Scatter(
@@ -1098,16 +1130,30 @@ def create_equity_curve_chart(metrics: Dict, benchmark_df: pd.DataFrame = None) 
         ))
     
     if benchmark_df is not None and not benchmark_df.empty:
-        # Normalize benchmark to start at same value as strategy
-        bench_close = benchmark_df['Close'] if 'Close' in benchmark_df.columns else benchmark_df.iloc[:, 0]
-        bench_normalized = bench_close / bench_close.iloc[0] * equity.iloc[0]
-        fig.add_trace(go.Scatter(
-            x=bench_normalized.index,
-            y=bench_normalized.values,
-            mode='lines',
-            name='Benchmark (NIFTY)',
-            line=dict(color='#00d4ff', width=1.5, dash='dot')
-        ))
+        try:
+            # Handle multi-level columns from newer yfinance
+            if isinstance(benchmark_df.columns, pd.MultiIndex):
+                benchmark_df.columns = benchmark_df.columns.get_level_values(0)
+            
+            # Get Close column
+            if 'Close' in benchmark_df.columns:
+                bench_close = benchmark_df['Close'].dropna()
+            else:
+                bench_close = benchmark_df.iloc[:, 0].dropna()
+            
+            if len(bench_close) > 0:
+                # Normalize benchmark to start at same value as strategy
+                bench_normalized = bench_close / bench_close.iloc[0] * initial_capital
+                
+                fig.add_trace(go.Scatter(
+                    x=bench_normalized.index,
+                    y=bench_normalized.values,
+                    mode='lines',
+                    name='Benchmark (NIFTY)',
+                    line=dict(color='#00d4ff', width=2, dash='dot')
+                ))
+        except Exception as e:
+            warnings.warn(f"Could not plot benchmark: {e}")
     
     fig.update_layout(
         title=dict(text='Equity Curve', font=dict(color='#ff6b35', size=16)),
@@ -1323,16 +1369,30 @@ def create_underwater_plot(metrics: Dict, benchmark_df: pd.DataFrame = None) -> 
         ))
     
     if benchmark_df is not None and not benchmark_df.empty:
-        bench_close = benchmark_df['Close'] if 'Close' in benchmark_df.columns else benchmark_df.iloc[:, 0]
-        bench_max = bench_close.cummax()
-        bench_dd = ((bench_close - bench_max) / bench_max) * 100
-        fig.add_trace(go.Scatter(
-            x=bench_dd.index,
-            y=bench_dd.values,
-            mode='lines',
-            name='Benchmark (NIFTY)',
-            line=dict(color='#00d4ff', width=1, dash='dot')
-        ))
+        try:
+            # Handle multi-level columns from newer yfinance
+            if isinstance(benchmark_df.columns, pd.MultiIndex):
+                benchmark_df = benchmark_df.copy()
+                benchmark_df.columns = benchmark_df.columns.get_level_values(0)
+            
+            # Get Close column
+            if 'Close' in benchmark_df.columns:
+                bench_close = benchmark_df['Close'].dropna()
+            else:
+                bench_close = benchmark_df.iloc[:, 0].dropna()
+            
+            if len(bench_close) > 0:
+                bench_max = bench_close.cummax()
+                bench_dd = ((bench_close - bench_max) / bench_max) * 100
+                fig.add_trace(go.Scatter(
+                    x=bench_dd.index,
+                    y=bench_dd.values,
+                    mode='lines',
+                    name='Benchmark (NIFTY)',
+                    line=dict(color='#00d4ff', width=1.5, dash='dot')
+                ))
+        except Exception as e:
+            warnings.warn(f"Could not plot benchmark drawdown: {e}")
     
     fig.update_layout(
         title=dict(text='Drawdown - Underwater Plot', font=dict(color='#ff6b35', size=16)),
@@ -1370,7 +1430,7 @@ def create_portfolio_growth_chart(metrics: Dict) -> go.Figure:
         
         # Add investment line (initial capital)
         fig.add_hline(
-            y=metrics.get('actual_investment', 0) if metrics.get('actual_investment', 0) > 0 else portfolio.iloc[0],
+            y=metrics.get('initial_capital', 500000),
             line_dash="dash",
             line_color="#00d4ff",
             annotation_text="Initial Investment"
@@ -2155,13 +2215,28 @@ def main():
                 # YoY Returns Table
                 st.markdown("### 📅 YoY Returns - Strategy Vs Benchmark")
                 yoy = metrics.get('yoy_returns', {})
+                benchmark_yoy = metrics.get('benchmark_yoy_returns', {})
                 if yoy:
-                    yoy_df = pd.DataFrame({
-                        'Year': list(yoy.keys()),
-                        'Benchmark': [f"{np.random.uniform(5, 20):.1f}" for _ in yoy.keys()],
-                        'Strategy': [f"{v:.1f}" for v in yoy.values()],
-                        'Verdict': ['Beats Benchmark' if v > 10 else 'Below Benchmark' for v in yoy.values()]
-                    })
+                    years = sorted(yoy.keys())
+                    yoy_data = []
+                    for year in years:
+                        strategy_return = yoy.get(year, 0)
+                        bench_return = benchmark_yoy.get(year, 0)
+                        
+                        # Determine verdict based on actual comparison
+                        if bench_return != 0:
+                            verdict = 'Beats Benchmark' if strategy_return > bench_return else 'Below Benchmark'
+                        else:
+                            verdict = 'N/A'
+                        
+                        yoy_data.append({
+                            'Year': year,
+                            'Benchmark': f"{bench_return:.1f}%",
+                            'Strategy': f"{strategy_return:.1f}%",
+                            'Verdict': verdict
+                        })
+                    
+                    yoy_df = pd.DataFrame(yoy_data)
                     st.dataframe(yoy_df, hide_index=True, use_container_width=True)
             
             # Portfolio Growth Chart (Full Width)
