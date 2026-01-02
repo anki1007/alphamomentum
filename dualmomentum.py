@@ -467,7 +467,7 @@ class StrategyConfig:
     min_position: float = 0.00
     vol_expansion_threshold: float = 1.5
     trend_threshold: float = 0.0
-    rebalance_frequency: str = 'M'
+    rebalance_frequency: str = 'Monthly'
     transaction_cost: float = 0.001
     n_simulations: int = 1000
     confidence_level: float = 0.95
@@ -642,7 +642,18 @@ class DualMomentumBacktester:
         portfolio_returns = pd.Series(index=returns.index, dtype=float)
         signals = pd.DataFrame(index=returns.index, columns=['regime', 'top_asset'])
         
-        rebal_dates = returns.resample(self.config.rebalance_frequency).last().index
+        
+        # Custom Frequency Mapping
+        freq_map = {
+            'Weekly': 'W-FRI',
+            'Fortnightly': '2W-FRI',
+            'Monthly': 'M',
+            'Quarterly': 'Q',
+            'Halfyearly': '6M'
+        }
+        target_freq = freq_map.get(self.config.rebalance_frequency, 'M')
+        rebal_dates = returns.resample(target_freq).last().index
+
         current_weights = np.zeros(len(returns.columns))
         
         for i, date in enumerate(returns.index):
