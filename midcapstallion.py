@@ -6,6 +6,11 @@
 ║  Author: Ankit Gupta                                                         ║
 ║  Stallions Quantitative Research                                             ║
 ║  QTF Framework: Repeatable, Risk-Controlled Probabilistic Decision Engine   ║
+║                                                                              ║
+║  Core Logic: Midcap Lot-Tracking Strategy                          ║
+║  - Individual lot-level exits at target price                                ║
+║  - One fresh entry per day from top 5 below DMA                              ║
+║  - Averaging only when all top 5 are held                                    ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -24,6 +29,8 @@ from scipy import stats
 import warnings
 import time
 import io
+import math
+import copy
 
 warnings.filterwarnings('ignore')
 
@@ -583,7 +590,44 @@ class EfficientFrontierEngine:
         return pd.DataFrame(results)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# BACKTEST ENGINE (LIFO LOT TRACKING)
+# XIRR CALCULATION (Newton-Raphson)
+# ══════════════════════════════════════════════════════════════════════════════
+def xirr(cashflows: List[Tuple[date, float]], guess: float = 0.10) -> Optional[float]:
+    """
+    Compute XIRR given cashflows: list of (date: datetime.date, amount: float).
+    Amounts: negative for outflows (buys), positive for inflows (sells).
+    Returns annualized rate as decimal (0.12 = 12%) or None if cannot compute.
+    """
+    if not cashflows:
+        return None
+    amounts = [amt for _, amt in cashflows]
+    if not any(a < 0 for a in amounts) or not any(a > 0 for a in amounts):
+        return None
+
+    cfs = sorted(cashflows, key=lambda x: x[0])
+    start_date = cfs[0][0]
+    times = np.array([(cf[0] - start_date).days / 365.0 for cf in cfs], dtype=float)
+    amounts_arr = np.array([cf[1] for cf in cfs], dtype=float)
+
+    rate = guess
+    for _ in range(200):
+        denom = (1.0 + rate) ** times
+        if np.any(denom == 0) or np.any(np.isinf(denom)) or np.any(np.isnan(denom)):
+            return None
+        npv = np.sum(amounts_arr / denom)
+        d_npv = np.sum(-times * amounts_arr / denom / (1.0 + rate))
+        if abs(d_npv) < 1e-12:
+            break
+        new_rate = rate - npv / d_npv
+        if not np.isfinite(new_rate):
+            return None
+        if abs(new_rate - rate) < 1e-10:
+            return new_rate
+        rate = new_rate
+    return float(rate)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BACKTEST ENGINE (LIFO LOT TRACKING - MidcapShop Strategy)
 # ══════════════════════════════════════════════════════════════════════════════
 @dataclass
 class Lot:
@@ -612,6 +656,13 @@ class Position:
 
 
 class BacktestEngine:
+    """
+    MidcapShop LIFO Backtester - Key Features:
+    - Individual lot-level exits at target price (lot.price * (1 + target_pct))
+    - Fresh entry: Only ONE stock per day from top 5 below DMA
+    - Averaging: Only when all top 5 are already held and no fresh buy made that day
+    - XIRR calculation for accurate performance measurement
+    """
     def __init__(
         self,
         instruments: List[str],
@@ -631,25 +682,28 @@ class BacktestEngine:
         dma_window: int = 20,
         max_avg: int = 3,
     ):
+        if position_sizing_mode not in ("static", "dynamic", "divisor"):
+            raise ValueError("position_sizing_mode must be 'static', 'dynamic', or 'divisor'.")
+        
         self.instruments = instruments
         self.start_date = start_date
         self.end_date = end_date
         self.position_sizing_mode = position_sizing_mode
         
-        self.fresh_static_amt = fresh_static_amt
-        self.avg_static_amt = avg_static_amt
-        self.fresh_cash_pct = fresh_cash_pct
-        self.avg_cash_pct = avg_cash_pct
-        self.fresh_trade_divisor = fresh_trade_divisor
-        self.avg_trade_divisor = avg_trade_divisor
+        self.fresh_static_amt = float(fresh_static_amt)
+        self.avg_static_amt = float(avg_static_amt)
+        self.fresh_cash_pct = float(fresh_cash_pct)
+        self.avg_cash_pct = float(avg_cash_pct)
+        self.fresh_trade_divisor = float(fresh_trade_divisor)
+        self.avg_trade_divisor = float(avg_trade_divisor)
         
-        self.initial_capital = initial_capital
-        self.cash = initial_capital
-        self.target_pct = target_pct
-        self.avg_trigger_pct = avg_trigger_pct
-        self.brokerage_per_order = brokerage_per_order
-        self.dma_window = dma_window
-        self.max_avg = max_avg
+        self.initial_capital = float(initial_capital)
+        self.cash = float(initial_capital)
+        self.target_pct = float(target_pct)
+        self.avg_trigger_pct = float(avg_trigger_pct)
+        self.brokerage_per_order = float(brokerage_per_order)
+        self.dma_window = int(dma_window)
+        self.max_avg = int(max_avg)
         
         self.positions: Dict[str, Position] = {}
         self.data: Dict[str, pd.DataFrame] = {}
@@ -657,30 +711,61 @@ class BacktestEngine:
         self.cashflow_ledger: List[Tuple] = []
         self.realized_pnl_by_date: Dict[pd.Timestamp, float] = {}
         self.equity_curve: List[dict] = []
+        self._fresh_buy = False  # Track if fresh buy was made today
         
+    def _get_latest_close(self, symbol: str, dt: pd.Timestamp) -> Optional[float]:
+        """Return latest Close on or before dt for valuation"""
+        df = self.data.get(symbol)
+        if df is None:
+            return None
+        subset = df.loc[df.index <= dt]
+        if subset.empty:
+            return None
+        return float(subset.iloc[-1]["Close"])
+    
     def _portfolio_value(self, dt: pd.Timestamp) -> float:
-        """Calculate total portfolio value"""
-        value = self.cash
+        """Calculate total portfolio value = cash + market value of open positions"""
+        value = float(self.cash)
         for sym, pos in self.positions.items():
-            if pos.total_qty() > 0:
-                df = self.data.get(sym)
-                if df is not None and dt in df.index:
-                    value += pos.total_qty() * float(df.loc[dt, 'Close'])
+            price = self._get_latest_close(sym, dt)
+            if price is None:
+                continue
+            value += pos.total_qty() * price
         return value
     
-    def _determine_qty_for_buy(self, trade_type: str, close_price: float, dt: pd.Timestamp) -> int:
-        """Determine quantity based on position sizing mode"""
-        if self.position_sizing_mode == 'static':
-            amount = self.fresh_static_amt if trade_type == 'fresh' else self.avg_static_amt
-        elif self.position_sizing_mode == 'dynamic':
-            pct = self.fresh_cash_pct if trade_type == 'fresh' else self.avg_cash_pct
-            amount = self.cash * pct
+    def _alloc_amount_for_trade(self, trade_kind: str, dt: pd.Timestamp) -> float:
+        """Compute the cash allocation amount for a trade"""
+        if self.position_sizing_mode == "static":
+            return float(self.fresh_static_amt) if trade_kind == "fresh" else float(self.avg_static_amt)
+        elif self.position_sizing_mode == "dynamic":
+            pct = float(self.fresh_cash_pct) if trade_kind == "fresh" else float(self.avg_cash_pct)
+            return float(self.cash) * float(pct)
         else:  # divisor
-            portfolio_val = self._portfolio_value(dt)
-            divisor = self.fresh_trade_divisor if trade_type == 'fresh' else self.avg_trade_divisor
-            amount = portfolio_val / divisor
+            divisor = self.fresh_trade_divisor if trade_kind == "fresh" else self.avg_trade_divisor
+            port_val = self._portfolio_value(dt)
+            return float(port_val) / float(divisor)
+    
+    def _qty_from_amount_and_price(self, amount: float, price: float) -> int:
+        """Return whole-share qty purchasable from amount at price (floor)"""
+        if amount <= 0 or price <= 0:
+            return 0
+        return math.floor(amount / price)
+    
+    def _determine_qty_for_buy(self, trade_kind: str, price: float, dt: pd.Timestamp) -> int:
+        """Determine quantity based on position sizing mode, ensuring cash supports the buy"""
+        alloc_amount = self._alloc_amount_for_trade(trade_kind, dt)
+        qty_by_alloc = self._qty_from_amount_and_price(alloc_amount, price)
         
-        return int(amount // close_price)
+        if qty_by_alloc <= 0:
+            return 0
+        if self.cash <= self.brokerage_per_order:
+            return 0
+        
+        max_qty_by_cash = math.floor((self.cash - self.brokerage_per_order) / price)
+        if max_qty_by_cash <= 0:
+            return 0
+        
+        return int(min(qty_by_alloc, max_qty_by_cash))
     
     def run_backtest(self, progress_callback=None) -> pd.DataFrame:
         """Run the complete backtest"""
@@ -690,31 +775,43 @@ class BacktestEngine:
         if not self.data:
             return pd.DataFrame()
         
-        # Calculate DMA for all instruments
+        # Calculate DMA and pct_below_20dma for all instruments
         for sym, df in self.data.items():
             df['DMA'] = df['Close'].rolling(window=self.dma_window).mean()
-            df['Below_DMA'] = df['Close'] < df['DMA']
+            df['pct_below_dma'] = np.where(
+                (df['DMA'].notna()) & (df['Close'] < df['DMA']),
+                (df['DMA'] - df['Close']) / df['DMA'],
+                0.0,
+            )
+            self.data[sym] = df
         
         # Get all trading days
-        all_dates = set()
-        for df in self.data.values():
-            all_dates.update(df.index.tolist())
+        all_dates = sorted({d for df in self.data.values() for d in df.index})
+        trading_days = [d for d in all_dates if self.start_date <= d.date() <= self.end_date]
         
-        trading_days = sorted([d for d in all_dates if self.start_date <= d.date() <= self.end_date])
+        if not trading_days:
+            return pd.DataFrame()
         
         # Main backtest loop
         for i, dt in enumerate(trading_days):
             if progress_callback:
                 progress_callback((i + 1) / len(trading_days))
             
-            # Process exits first
+            self._fresh_buy = False
+            
+            # 1) Process exits first (LIFO lot-level exits)
             self._process_exits(dt)
             
-            # Process fresh entries
-            self._process_entries(dt)
+            # 2) Get top 5 stocks below DMA
+            top5 = self._get_top5_below_dma(dt)
             
-            # Process averaging
-            self._process_averaging(dt)
+            # 3) Process fresh entry (ONE stock from top 5)
+            self._process_entries(dt, top5)
+            
+            # 4) Process averaging only if all top 5 are held and no fresh buy
+            if not self._fresh_buy:
+                if top5 and all(sym in self.positions and self.positions[sym].total_qty() > 0 for sym in top5):
+                    self._process_averaging(dt)
             
             # Record equity
             self.equity_curve.append({
@@ -725,10 +822,23 @@ class BacktestEngine:
         
         return pd.DataFrame(self._completed_trades)
     
+    def _get_top5_below_dma(self, dt: pd.Timestamp) -> List[str]:
+        """Get top 5 stocks most below DMA"""
+        candidates: List[Tuple[str, float]] = []
+        for sym, df in self.data.items():
+            if dt not in df.index:
+                continue
+            pct = df.loc[dt, "pct_below_dma"]
+            if not pd.isna(pct) and pct > 0:
+                candidates.append((sym, float(pct)))
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        return [sym for sym, _ in candidates[:5]]
+    
     def _process_exits(self, dt: pd.Timestamp):
-        """Process exits for existing positions"""
-        for sym in list(self.positions.keys()):
-            pos = self.positions[sym]
+        """Process LIFO lot-level exits - each lot exits at its own target price"""
+        symbols_to_exit = []
+        
+        for sym, pos in list(self.positions.items()):
             if pos.total_qty() == 0:
                 continue
             
@@ -736,97 +846,123 @@ class BacktestEngine:
             if df is None or dt not in df.index:
                 continue
             
-            high_price = float(df.loc[dt, 'High'])
-            avg_price = pos.avg_price()
+            row = df.loc[dt]
             
-            if avg_price is None:
-                continue
-            
-            target_price = avg_price * (1 + self.target_pct)
-            
-            if high_price >= target_price:
-                # Exit at target
-                total_qty = pos.total_qty()
-                total_buy_cost = sum(l.qty * l.price for l in pos.lots)
-                total_buy_brokerage = pos.total_buy_brokerage()
-                
-                sell_value = total_qty * target_price
-                sell_brokerage = self.brokerage_per_order
-                
-                gross_pnl = sell_value - total_buy_cost
-                net_pnl = gross_pnl - total_buy_brokerage - sell_brokerage
-                pnl_pct = (net_pnl / total_buy_cost) * 100
-                
-                self.cash += sell_value - sell_brokerage
-                
-                # Record trade
-                self._completed_trades.append({
-                    'Symbol': sym,
-                    'Entry_Date': pos.lots[0].date,
-                    'Exit_Date': dt,
-                    'Avg_Price': avg_price,
-                    'Exit_Price': target_price,
-                    'Qty': total_qty,
-                    'Gross_PnL': gross_pnl,
-                    'Net_PnL': net_pnl,
-                    'PnL_%': pnl_pct,
-                    'Lots': len(pos.lots)
-                })
-                
-                # Record cashflow
-                self.cashflow_ledger.append((dt.date(), sell_value - sell_brokerage))
-                
-                if dt not in self.realized_pnl_by_date:
-                    self.realized_pnl_by_date[dt] = 0
-                self.realized_pnl_by_date[dt] += net_pnl
-                
-                # Clear position
-                pos.lots.clear()
-    
-    def _process_entries(self, dt: pd.Timestamp):
-        """Process fresh entries"""
-        candidates = []
+            # Check each lot for individual target exit
+            for lot in pos.lots:
+                target_price = lot.price * (1.0 + self.target_pct)
+                if row["High"] >= target_price:
+                    symbols_to_exit.append((sym, target_price, lot.date))
         
-        for sym in self.instruments:
-            if sym in self.positions and self.positions[sym].total_qty() > 0:
-                continue
+        for sym, exit_price, entry_dt in symbols_to_exit:
+            self._execute_exit(sym, exit_price, entry_dt, dt)
+    
+    def _execute_exit(self, symbol: str, exit_price: float, entry_dt: pd.Timestamp, dt: pd.Timestamp):
+        """Execute exit for specific lot(s) at given entry date"""
+        pos = self.positions.get(symbol)
+        if not pos:
+            return
+        
+        exit_lots = [lot for lot in pos.lots if lot.date == entry_dt]
+        if not exit_lots:
+            return
+        
+        total_qty = sum(l.qty for l in exit_lots)
+        total_buy_cost = sum(l.qty * l.price for l in exit_lots)
+        total_buy_brokerage = sum(l.buy_brokerage for l in exit_lots)
+        
+        total_proceeds = total_qty * exit_price
+        sell_brokerage = self.brokerage_per_order
+        
+        # Allocate sell brokerage proportionally
+        lot_values = [l.qty * exit_price for l in exit_lots]
+        total_value = sum(lot_values) if lot_values else 0.0
+        proportions = [lv / total_value if total_value > 0 else (1.0 / len(lot_values)) for lv in lot_values]
+        
+        # Update cash
+        self.cash += total_proceeds - sell_brokerage
+        
+        # Record realized PnL
+        date_key = dt.normalize()
+        self.realized_pnl_by_date.setdefault(date_key, 0.0)
+        
+        # Create trade records for each lot
+        for lot, prop in zip(exit_lots, proportions):
+            lot_qty = lot.qty
+            entry_price = lot.price
+            entry_date = lot.date
+            lot_buy_brokerage = lot.buy_brokerage
+            lot_sell_brokerage = sell_brokerage * prop
+            gross_pnl = lot_qty * (exit_price - entry_price)
+            lot_total_brokerage = lot_buy_brokerage + lot_sell_brokerage
+            net_pnl = gross_pnl - lot_total_brokerage
+            pnl_pct = ((exit_price - entry_price) / entry_price * 100.0) if entry_price > 0 else 0.0
+            
+            self._completed_trades.append({
+                'Symbol': symbol,
+                'Entry_Date': entry_date,
+                'Exit_Date': dt,
+                'Avg_Price': entry_price,
+                'Exit_Price': exit_price,
+                'Qty': lot_qty,
+                'Gross_PnL': gross_pnl,
+                'Net_PnL': net_pnl,
+                'PnL_%': pnl_pct,
+                'Brokerage': lot_total_brokerage,
+                'Lots': 1
+            })
+            
+            self.realized_pnl_by_date[date_key] += net_pnl
+            
+            # Record cashflows for XIRR
+            self.cashflow_ledger.append((entry_date.date() if hasattr(entry_date, 'date') else entry_date, 
+                                         -(lot_qty * entry_price + lot_buy_brokerage)))
+            self.cashflow_ledger.append((dt.date(), (lot_qty * exit_price - lot_sell_brokerage)))
+        
+        # Remove exited lots from position
+        pos.lots = [lot for lot in pos.lots if lot.date != entry_dt]
+        if not pos.lots:
+            del self.positions[symbol]
+    
+    def _process_entries(self, dt: pd.Timestamp, top5: List[str]):
+        """Process fresh entry - only ONE stock per day from top 5"""
+        if not top5:
+            return
+        
+        for sym in top5:
+            pos = self.positions.get(sym)
+            if pos and pos.total_qty() > 0:
+                continue  # Already held
             
             df = self.data.get(sym)
             if df is None or dt not in df.index:
                 continue
             
-            if pd.isna(df.loc[dt, 'DMA']):
-                continue
+            close_price = float(df.loc[dt, "Close"])
+            qty = self._determine_qty_for_buy("fresh", close_price, dt)
             
-            if df.loc[dt, 'Below_DMA']:
-                deviation = ((df.loc[dt, 'Close'] - df.loc[dt, 'DMA']) / df.loc[dt, 'DMA']) * 100
-                candidates.append((sym, deviation, float(df.loc[dt, 'Close'])))
-        
-        # Sort by deviation and take top 5
-        candidates.sort(key=lambda x: x[1])
-        
-        for sym, deviation, close_price in candidates[:5]:
-            qty = self._determine_qty_for_buy('fresh', close_price, dt)
             if qty <= 0:
                 continue
             
             total_cost = qty * close_price + self.brokerage_per_order
-            if total_cost > self.cash:
+            if total_cost > self.cash + 1e-9:
                 continue
             
+            # Execute buy
             self.cash -= total_cost
-            
-            if sym not in self.positions:
-                self.positions[sym] = Position(symbol=sym)
-            
             lot = Lot(qty=qty, price=close_price, date=dt, buy_brokerage=self.brokerage_per_order)
-            self.positions[sym].lots.append(lot)
+            self.positions[sym] = Position(symbol=sym, lots=[lot])
             
-            self.cashflow_ledger.append((dt.date(), -total_cost))
+            # Record cashflow
+            self.cashflow_ledger.append((dt.date(), -(qty * close_price + self.brokerage_per_order)))
+            
+            # Only ONE fresh buy per day
+            self._fresh_buy = True
+            break
     
     def _process_averaging(self, dt: pd.Timestamp):
-        """Process averaging for existing positions"""
-        for sym, pos in self.positions.items():
+        """Process averaging for existing positions when all top 5 are held"""
+        for sym, pos in list(self.positions.items()):
             if pos.total_qty() == 0:
                 continue
             
@@ -837,7 +973,7 @@ class BacktestEngine:
             if df is None or dt not in df.index:
                 continue
             
-            close_price = float(df.loc[dt, 'Close'])
+            close_price = float(df.loc[dt, "Close"])
             last_buy_price = pos.last_buy_price()
             
             if last_buy_price is None:
@@ -846,24 +982,27 @@ class BacktestEngine:
             pct_drop = (last_buy_price - close_price) / last_buy_price
             
             if pct_drop > self.avg_trigger_pct:
-                qty = self._determine_qty_for_buy('avg', close_price, dt)
+                qty = self._determine_qty_for_buy("avg", close_price, dt)
                 if qty <= 0:
                     continue
                 
                 total_cost = qty * close_price + self.brokerage_per_order
-                if total_cost > self.cash:
+                if total_cost > self.cash + 1e-9:
                     continue
                 
+                # Execute averaging buy
                 self.cash -= total_cost
-                
                 lot = Lot(qty=qty, price=close_price, date=dt, buy_brokerage=self.brokerage_per_order)
                 pos.lots.append(lot)
                 
-                self.cashflow_ledger.append((dt.date(), -total_cost))
-                break  # One averaging per day
+                # Record cashflow
+                self.cashflow_ledger.append((dt.date(), -(qty * close_price + self.brokerage_per_order)))
+                
+                # Only one averaging per day
+                break
     
     def get_performance_metrics(self) -> dict:
-        """Calculate comprehensive performance metrics"""
+        """Calculate comprehensive performance metrics including XIRR"""
         if not self._completed_trades:
             return {}
         
@@ -879,6 +1018,20 @@ class BacktestEngine:
         # Returns
         total_return = (ending_balance / starting_balance - 1) * 100
         cagr = ((ending_balance / starting_balance) ** (1 / years) - 1) * 100 if years > 0 else 0
+        
+        # XIRR calculation
+        if self.cashflow_ledger:
+            cf_df = pd.DataFrame(self.cashflow_ledger, columns=["date", "amt"])
+            cf_df = cf_df.groupby("date", as_index=False).sum().sort_values("date")
+            cashflows = [(pd.to_datetime(r["date"]).date() if not isinstance(r["date"], date) else r["date"], 
+                         float(r["amt"])) for _, r in cf_df.iterrows()]
+            # Include final cash as inflow
+            if self.cash != 0.0:
+                cashflows.append((self.end_date, float(self.cash)))
+            cashflows.sort(key=lambda x: x[0])
+            xirr_val = xirr(cashflows, guess=0.10)
+        else:
+            xirr_val = None
         
         # Win/Loss metrics
         wins = trades_df[trades_df['Net_PnL'] > 0]
@@ -913,6 +1066,7 @@ class BacktestEngine:
             'total_net_pnl': total_net_pnl,
             'total_return': total_return,
             'cagr': cagr,
+            'xirr': xirr_val * 100 if xirr_val is not None else None,
             'max_drawdown': max_drawdown,
             'total_trades': len(trades_df),
             'winning_trades': len(wins),
@@ -1022,13 +1176,13 @@ def create_monthly_returns_heatmap(trades_df: pd.DataFrame) -> go.Figure:
     if trades_df.empty:
         return go.Figure()
     
+    trades_df = trades_df.copy()
     trades_df['Exit_Date'] = pd.to_datetime(trades_df['Exit_Date'])
     trades_df['Year'] = trades_df['Exit_Date'].dt.year
     trades_df['Month'] = trades_df['Exit_Date'].dt.month
     
     monthly_pnl = trades_df.groupby(['Year', 'Month'])['Net_PnL'].sum().unstack(fill_value=0)
     
-    # Convert to returns percentage (assuming starting capital)
     months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
     
     fig = go.Figure(data=go.Heatmap(
@@ -1068,19 +1222,13 @@ def create_monthly_returns_heatmap(trades_df: pd.DataFrame) -> go.Figure:
 
 def create_efficient_frontier_plot(ef_engine: EfficientFrontierEngine) -> go.Figure:
     """Create efficient frontier visualization"""
-    # Monte Carlo simulation
     mc_results = ef_engine.monte_carlo_simulation(3000)
-    
-    # Efficient frontier
     ef_results = ef_engine.efficient_frontier(50)
-    
-    # Optimal portfolios
     max_sharpe_weights, max_sharpe_ret, max_sharpe_vol, max_sharpe = ef_engine.optimize_sharpe()
     min_vol_weights, min_vol_ret, min_vol_vol, min_vol_sharpe = ef_engine.min_volatility()
     
     fig = go.Figure()
     
-    # Monte Carlo points
     fig.add_trace(go.Scatter(
         x=mc_results['Volatility'],
         y=mc_results['Return'],
@@ -1100,7 +1248,6 @@ def create_efficient_frontier_plot(ef_engine: EfficientFrontierEngine) -> go.Fig
         hovertemplate='Volatility: %{x:.2f}%<br>Return: %{y:.2f}%<br>Sharpe: %{marker.color:.2f}<extra></extra>'
     ))
     
-    # Efficient frontier line
     if not ef_results.empty:
         fig.add_trace(go.Scatter(
             x=ef_results['Volatility'],
@@ -1110,7 +1257,6 @@ def create_efficient_frontier_plot(ef_engine: EfficientFrontierEngine) -> go.Fig
             line=dict(color='#00d4ff', width=3)
         ))
     
-    # Maximum Sharpe portfolio
     fig.add_trace(go.Scatter(
         x=[max_sharpe_vol * 100],
         y=[max_sharpe_ret * 100],
@@ -1119,7 +1265,6 @@ def create_efficient_frontier_plot(ef_engine: EfficientFrontierEngine) -> go.Fig
         name=f'Max Sharpe ({max_sharpe:.2f})'
     ))
     
-    # Minimum volatility portfolio
     fig.add_trace(go.Scatter(
         x=[min_vol_vol * 100],
         y=[min_vol_ret * 100],
@@ -1160,7 +1305,6 @@ def create_efficient_frontier_plot(ef_engine: EfficientFrontierEngine) -> go.Fig
 
 def create_portfolio_allocation_chart(weights: np.ndarray, symbols: List[str], title: str) -> go.Figure:
     """Create portfolio allocation pie chart"""
-    # Filter out zero weights
     non_zero_mask = weights > 0.01
     filtered_weights = weights[non_zero_mask]
     filtered_symbols = [s for s, m in zip(symbols, non_zero_mask) if m]
@@ -1201,7 +1345,7 @@ def render_header():
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
                     <h1 class="terminal-title">◆ STALLIONS QUANT TERMINAL</h1>
-                    <p class="terminal-subtitle">Institutional-Grade Mean Reversion Analytics • QTF Framework • Author: Ankit Gupta</p>
+                    <p class="terminal-subtitle">MidcapShop LIFO Strategy • Lot-Level Tracking • QTF Framework</p>
                 </div>
                 <div class="live-indicator">
                     <span class="live-dot"></span>
@@ -1255,20 +1399,20 @@ def main():
             )
             
             if sizing_mode == "divisor":
-                fresh_divisor = st.number_input("Fresh Trade Divisor", 10, 100, 40)
-                avg_divisor = st.number_input("Avg Trade Divisor", 5, 50, 10)
+                fresh_divisor = st.number_input("Fresh Trade Divisor", 10, 100, 30)
+                avg_divisor = st.number_input("Avg Trade Divisor", 10, 100, 30)
             elif sizing_mode == "static":
                 fresh_static = st.number_input("Fresh Trade Amount (₹)", 5000, 100000, 10000)
-                avg_static = st.number_input("Avg Trade Amount (₹)", 2500, 50000, 5000)
+                avg_static = st.number_input("Avg Trade Amount (₹)", 2500, 50000, 20000)
             else:
                 fresh_pct = st.slider("Fresh Trade % of Cash", 1, 20, 4) / 100
-                avg_pct = st.slider("Avg Trade % of Cash", 1, 15, 3) / 100
+                avg_pct = st.slider("Avg Trade % of Cash", 1, 15, 6) / 100
             
             st.markdown("#### Strategy Parameters")
             initial_capital = st.number_input("Initial Capital (₹)", 100000, 10000000, 400000)
             target_pct = st.slider("Target %", 3, 15, 8) / 100
             avg_trigger = st.slider("Avg Trigger %", 2, 10, 5) / 100
-            max_positions = st.slider("Max Positions per Stock", 1, 5, 3)
+            max_positions = st.slider("Max Lots per Stock", 1, 5, 3)
             dma_window = st.slider("DMA Window", 10, 50, 20)
             
         elif mode == "📈 Efficient Frontier":
@@ -1280,9 +1424,9 @@ def main():
         st.markdown("---")
         st.markdown("""
             <div style="text-align: center; opacity: 0.6; font-size: 0.75rem; font-family: 'JetBrains Mono';">
-                Stallions QTF Framework v2.0<br>
-                Risk-Controlled Probabilistic Engine<br>
-                <span style="color: #00d4ff;">Author: Ankit Gupta</span>
+                Stallions QTF Framework v2.1<br>
+                Midcap 50 Engine<br>
+                <span style="color: #00d4ff;">Author: Stallions</span>
             </div>
         """, unsafe_allow_html=True)
     
@@ -1295,7 +1439,6 @@ def main():
                 screener_df = run_screener(MIDCAP50_UNIVERSE, dma_window)
             
             if not screener_df.empty:
-                # Top metrics
                 below_dma_count = screener_df['Below DMA'].sum()
                 avg_deviation = screener_df['Deviation %'].mean()
                 buy_signals = len(screener_df[screener_df['Signal'] == 'BUY'])
@@ -1312,7 +1455,6 @@ def main():
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 
-                # Top picks
                 st.markdown('<div class="section-header">TOP PICKS - MAXIMUM DEVIATION FROM DMA</div>', unsafe_allow_html=True)
                 top_picks = screener_df[screener_df['Below DMA']].head(top_n)
                 
@@ -1333,7 +1475,6 @@ def main():
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 
-                # Full screener table
                 st.markdown('<div class="section-header">COMPLETE SCREENER RESULTS</div>', unsafe_allow_html=True)
                 
                 display_df = screener_df.copy()
@@ -1352,7 +1493,16 @@ def main():
                 )
                 
     elif mode == "🔄 Backtest":
-        st.markdown('<div class="section-header">BACKTEST ENGINE</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">MIDCAPSHOP LIFO BACKTEST ENGINE</div>', unsafe_allow_html=True)
+        
+        # Strategy info box
+        st.info("""
+        **MidcapShop LIFO Strategy Rules:**
+        - 🎯 **Entry**: One fresh buy per day from top 5 stocks most below DMA
+        - 📉 **Averaging**: Only when all top 5 are held, based on trigger % drop from last buy
+        - 💰 **Exit**: Individual lot targets (lot price × (1 + target%))
+        - 📊 **Lot Tracking**: Each buy is tracked separately for precise P&L
+        """)
         
         if st.button("🚀 RUN BACKTEST", use_container_width=True):
             # Initialize backtest
@@ -1419,16 +1569,20 @@ def main():
                 st.session_state['backtest_equity'] = engine.equity_curve
                 
                 # Key Metrics Row 1
-                cols = st.columns(5)
+                cols = st.columns(6)
                 with cols[0]:
                     st.markdown(render_metric_card("TOTAL RETURN", f"{metrics['total_return']:.1f}%", "positive" if metrics['total_return'] > 0 else "negative"), unsafe_allow_html=True)
                 with cols[1]:
                     st.markdown(render_metric_card("CAGR", f"{metrics['cagr']:.1f}%", "positive" if metrics['cagr'] > 0 else "negative"), unsafe_allow_html=True)
                 with cols[2]:
-                    st.markdown(render_metric_card("WIN RATE", f"{metrics['win_rate']:.1f}%", "positive" if metrics['win_rate'] > 50 else "negative"), unsafe_allow_html=True)
+                    xirr_val = metrics.get('xirr')
+                    xirr_str = f"{xirr_val:.1f}%" if xirr_val is not None else "N/A"
+                    st.markdown(render_metric_card("XIRR", xirr_str, "positive" if xirr_val and xirr_val > 0 else "neutral"), unsafe_allow_html=True)
                 with cols[3]:
-                    st.markdown(render_metric_card("MAX DRAWDOWN", f"{metrics['max_drawdown']:.2f}%", "negative" if metrics['max_drawdown'] < -10 else "neutral"), unsafe_allow_html=True)
+                    st.markdown(render_metric_card("WIN RATE", f"{metrics['win_rate']:.1f}%", "positive" if metrics['win_rate'] > 50 else "negative"), unsafe_allow_html=True)
                 with cols[4]:
+                    st.markdown(render_metric_card("MAX DRAWDOWN", f"{metrics['max_drawdown']:.2f}%", "negative" if metrics['max_drawdown'] < -10 else "neutral"), unsafe_allow_html=True)
+                with cols[5]:
                     st.markdown(render_metric_card("SHARPE", f"{metrics['sharpe']:.2f}", "positive" if metrics['sharpe'] > 1 else "neutral"), unsafe_allow_html=True)
                 
                 st.markdown("<br>", unsafe_allow_html=True)
@@ -1482,7 +1636,7 @@ def main():
                     st.plotly_chart(fig_dist, use_container_width=True)
                 
                 # Trade Book
-                st.markdown('<div class="section-header">TRADE BOOK</div>', unsafe_allow_html=True)
+                st.markdown('<div class="section-header">TRADE BOOK (LOT-LEVEL)</div>', unsafe_allow_html=True)
                 
                 display_trades = trades_df.copy()
                 display_trades['Entry_Date'] = pd.to_datetime(display_trades['Entry_Date']).dt.strftime('%Y-%m-%d')
@@ -1499,7 +1653,7 @@ def main():
                 st.download_button(
                     label="📥 DOWNLOAD TRADE BOOK",
                     data=csv,
-                    file_name=f"mcap50_backtest_{start_date}_{end_date}.csv",
+                    file_name=f"mcap50_lifo_backtest_{start_date}_{end_date}.csv",
                     mime="text/csv"
                 )
             else:
@@ -1513,23 +1667,19 @@ def main():
                 end_date = date.today()
                 start_date = end_date - timedelta(days=lookback_days)
                 
-                # Fetch data for optimization
                 selected_symbols = MIDCAP50_UNIVERSE[:num_assets]
                 data = fetch_multiple_stocks(selected_symbols, start_date, end_date)
                 
                 if len(data) >= 3:
-                    # Build returns dataframe
                     closes = pd.DataFrame({sym: df['Close'] for sym, df in data.items()})
                     returns = closes.pct_change().dropna()
                     
-                    # Run optimization
                     ef_engine = EfficientFrontierEngine(returns, risk_free)
                     
                     fig_ef, max_sharpe_weights, min_vol_weights = create_efficient_frontier_plot(ef_engine)
                     
                     st.plotly_chart(fig_ef, use_container_width=True)
                     
-                    # Display optimal portfolios
                     col1, col2 = st.columns(2)
                     
                     with col1:
@@ -1566,7 +1716,6 @@ def main():
                             use_container_width=True
                         )
                     
-                    # Allocation table
                     st.markdown('<div class="section-header">DETAILED ALLOCATIONS</div>', unsafe_allow_html=True)
                     
                     allocation_df = pd.DataFrame({
@@ -1589,7 +1738,6 @@ def main():
             trades_df = st.session_state['backtest_trades']
             metrics = st.session_state['backtest_metrics']
             
-            # Detailed analysis
             tab1, tab2, tab3 = st.tabs(["📊 Statistics", "🎯 By Symbol", "📅 By Period"])
             
             with tab1:
@@ -1597,11 +1745,14 @@ def main():
                 
                 with col1:
                     st.markdown("#### Returns Statistics")
+                    xirr_val = metrics.get('xirr')
+                    xirr_str = f"{xirr_val:.2f}%" if xirr_val is not None else "N/A"
                     stats_data = {
-                        'Metric': ['Total Return', 'CAGR', 'Best Month', 'Worst Month', 'Avg Monthly', 'Volatility (Ann.)'],
+                        'Metric': ['Total Return', 'CAGR', 'XIRR', 'Best Month', 'Worst Month', 'Avg Monthly', 'Volatility (Ann.)'],
                         'Value': [
                             f"{metrics['total_return']:.2f}%",
                             f"{metrics['cagr']:.2f}%",
+                            xirr_str,
                             f"{trades_df.groupby(pd.to_datetime(trades_df['Exit_Date']).dt.to_period('M'))['Net_PnL'].sum().max()/1000:.1f}K",
                             f"{trades_df.groupby(pd.to_datetime(trades_df['Exit_Date']).dt.to_period('M'))['Net_PnL'].sum().min()/1000:.1f}K",
                             f"{trades_df.groupby(pd.to_datetime(trades_df['Exit_Date']).dt.to_period('M'))['Net_PnL'].sum().mean()/1000:.1f}K",
@@ -1636,7 +1787,6 @@ def main():
                 
                 st.dataframe(symbol_stats, use_container_width=True)
                 
-                # Bar chart
                 fig_sym = go.Figure()
                 fig_sym.add_trace(go.Bar(
                     x=symbol_stats.index[:15],
@@ -1655,8 +1805,9 @@ def main():
             
             with tab3:
                 st.markdown("#### Performance by Year")
-                trades_df['Year'] = pd.to_datetime(trades_df['Exit_Date']).dt.year
-                yearly_stats = trades_df.groupby('Year').agg({
+                trades_df_copy = trades_df.copy()
+                trades_df_copy['Year'] = pd.to_datetime(trades_df_copy['Exit_Date']).dt.year
+                yearly_stats = trades_df_copy.groupby('Year').agg({
                     'Net_PnL': 'sum',
                     'Symbol': 'count',
                     'PnL_%': 'mean'
