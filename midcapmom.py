@@ -967,6 +967,56 @@ class BacktestEngine:
         metrics['years'] = years
         metrics['cagr'] = ((metrics['ending_balance'] / self.initial_capital) ** (1.0 / years) - 1.0) * 100 if years > 0 else 0
         
+        # Capital Turns
+        metrics['capital_turns'] = metrics['total_turnover'] / self.initial_capital if self.initial_capital > 0 else 0
+        
+        # IRR (Internal Rate of Return) calculation using cashflows
+        try:
+            if self.cashflow_ledger:
+                # Sort cashflows by date
+                sorted_cashflows = sorted(self.cashflow_ledger, key=lambda x: x[0])
+                
+                # Build cashflow series: initial investment + trades + ending value
+                cf_dates = [self.start_date] + [cf[0] for cf in sorted_cashflows]
+                cf_values = [-self.initial_capital] + [cf[1] for cf in sorted_cashflows]
+                
+                # Add final portfolio value as positive cashflow
+                final_value = metrics['ending_balance']
+                cf_dates.append(self.end_date)
+                cf_values.append(final_value)
+                
+                # Calculate IRR using numpy
+                if len(cf_values) > 2:
+                    # Convert dates to years from start
+                    start_dt = pd.Timestamp(self.start_date)
+                    time_fractions = [(pd.Timestamp(d) - start_dt).days / 365.25 for d in cf_dates]
+                    
+                    # XIRR approximation using Newton-Raphson
+                    def xnpv(rate, cashflows, times):
+                        return sum([cf / (1 + rate) ** t for cf, t in zip(cashflows, times)])
+                    
+                    def xirr(cashflows, times, guess=0.1):
+                        rate = guess
+                        for _ in range(100):
+                            npv = xnpv(rate, cashflows, times)
+                            dnpv = sum([-t * cf / (1 + rate) ** (t + 1) for cf, t in zip(cashflows, times)])
+                            if abs(dnpv) < 1e-10:
+                                break
+                            new_rate = rate - npv / dnpv
+                            if abs(new_rate - rate) < 1e-6:
+                                break
+                            rate = new_rate
+                        return rate
+                    
+                    irr = xirr(cf_values, time_fractions) * 100
+                    metrics['irr'] = irr if not np.isnan(irr) and abs(irr) < 1000 else metrics['cagr']
+                else:
+                    metrics['irr'] = metrics['cagr']
+            else:
+                metrics['irr'] = metrics['cagr']
+        except:
+            metrics['irr'] = metrics['cagr']
+        
         # Holding period
         if 'Holding Days' in trades_df.columns:
             metrics['avg_holding_period'] = trades_df['Holding Days'].mean()
@@ -1151,10 +1201,11 @@ class BacktestEngine:
         """Return empty metrics dictionary"""
         return {
             'total_trades': 0, 'winning_trades': 0, 'losing_trades': 0, 'win_ratio': 0,
-            'actual_investment': 0, 'gross_pnl': 0, 'net_pnl': 0,
+            'actual_investment': self.initial_capital, 'gross_pnl': 0, 'net_pnl': 0,
             'ending_balance': self.initial_capital, 'gross_pnl_pct': 0, 'net_pnl_pct': 0,
-            'cagr': 0, 'max_drawdown': 0, 'sharpe': 0, 'sortino': 0, 'calmar': 0,
-            'profit_factor': 0, 'kelly': 0
+            'cagr': 0, 'irr': 0, 'max_drawdown': 0, 'sharpe': 0, 'sortino': 0, 'calmar': 0,
+            'profit_factor': 0, 'kelly': 0, 'total_turnover': 0, 'capital_turns': 0,
+            'total_brokerage': 0, 'avg_holding_period': 0
         }
 
 
@@ -1558,22 +1609,31 @@ def export_to_excel(trades_df: pd.DataFrame, metrics: Dict) -> bytes:
         metrics_data = {
             'Metric': [
                 'Total Trades', 'Winning Trades', 'Losing Trades', 'Win Ratio %',
-                'Initial Capital', 'Total Turnover', 'Ending Balance', 'Net PnL',
-                'Net PnL %', 'CAGR %', 'Max Drawdown %', 'Sharpe Ratio', 'Sortino Ratio',
-                'Calmar Ratio', 'Profit Factor', 'Kelly %', 'Avg Holding Period (Days)'
+                'Initial Capital', 'Ending Balance', 'Total Turnover', 'Capital Turns',
+                'Gross PnL', 'Net PnL', 'Gross PnL %', 'Net PnL %',
+                'IRR %', 'CAGR %', 'Max Drawdown %', 
+                'Sharpe Ratio', 'Sortino Ratio', 'Calmar Ratio', 'Profit Factor', 
+                'Kelly %', 'Avg Holding Period (Days)', 'Total Brokerage'
             ],
             'Value': [
                 metrics.get('total_trades', 0), metrics.get('winning_trades', 0),
                 metrics.get('losing_trades', 0), round(metrics.get('win_ratio', 0), 2),
                 round(metrics.get('actual_investment', 0), 2),
-                round(metrics.get('total_turnover', 0), 2),
                 round(metrics.get('ending_balance', 0), 2),
-                round(metrics.get('net_pnl', 0), 2), round(metrics.get('net_pnl_pct', 0), 2),
-                round(metrics.get('cagr', 0), 2), round(metrics.get('max_drawdown', 0), 2),
+                round(metrics.get('total_turnover', 0), 2),
+                round(metrics.get('capital_turns', 0), 2),
+                round(metrics.get('gross_pnl', 0), 2),
+                round(metrics.get('net_pnl', 0), 2), 
+                round(metrics.get('gross_pnl_pct', 0), 2),
+                round(metrics.get('net_pnl_pct', 0), 2),
+                round(metrics.get('irr', 0), 2),
+                round(metrics.get('cagr', 0), 2), 
+                round(metrics.get('max_drawdown', 0), 2),
                 round(metrics.get('sharpe', 0), 2), round(metrics.get('sortino', 0), 2),
                 round(metrics.get('calmar', 0), 2),
                 round(metrics.get('profit_factor', 0), 2) if metrics.get('profit_factor', 0) != float('inf') else 999,
-                round(metrics.get('kelly', 0), 2), round(metrics.get('avg_holding_period', 0), 1)
+                round(metrics.get('kelly', 0), 2), round(metrics.get('avg_holding_period', 0), 1),
+                round(metrics.get('total_brokerage', 0), 2)
             ]
         }
         pd.DataFrame(metrics_data).to_excel(writer, sheet_name='Metrics Summary', index=False)
@@ -1711,8 +1771,8 @@ def render_header():
         <div class="terminal-header">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
-                    <h1 class="terminal-title">📈 STALLIONS QUANT TERMINAL</h1>
-                    <p class="terminal-subtitle">Institutional-Grade Mean Reversion Analytics • Midcap 50 Strategy • Author: Ankit Gupta</p>
+                    <h1 class="terminal-title">◆ STALLIONS QUANT TERMINAL</h1>
+                    <p class="terminal-subtitle">Institutional-Grade Mean Reversion Analytics • Midcap 50 Strategy • Author: Stallions</p>
                 </div>
                 <div class="live-indicator">
                     <span class="live-dot"></span>
@@ -1914,28 +1974,71 @@ def main():
             trades_df = st.session_state['backtest_trades']
             benchmark_df = st.session_state.get('benchmark_df', None)
             
-            # Key metrics
+            # Key metrics - Row 1
             st.markdown('<div class="section-header">KEY PERFORMANCE METRICS</div>', unsafe_allow_html=True)
             
-            mcols = st.columns(6)
-            with mcols[0]:
-                st.markdown(render_metric_card("NET P&L", f"₹{metrics.get('net_pnl', 0):,.0f}", 
-                    "positive" if metrics.get('net_pnl', 0) > 0 else "negative"), unsafe_allow_html=True)
-            with mcols[1]:
-                st.markdown(render_metric_card("CAGR", f"{metrics.get('cagr', 0):.2f}%",
+            row1 = st.columns(7)
+            with row1[0]:
+                st.markdown(render_metric_card("TOTAL TRADES", str(metrics.get('total_trades', 0)), "neutral"), unsafe_allow_html=True)
+            with row1[1]:
+                st.markdown(render_metric_card("WINNING TRADES", str(metrics.get('winning_trades', 0)), "positive"), unsafe_allow_html=True)
+            with row1[2]:
+                st.markdown(render_metric_card("WIN RATIO", f"{metrics.get('win_ratio', 0):.1f}%", 
+                    "positive" if metrics.get('win_ratio', 0) > 50 else "negative"), unsafe_allow_html=True)
+            with row1[3]:
+                st.markdown(render_metric_card("INITIAL CAPITAL", f"₹{metrics.get('actual_investment', 0):,.0f}", "neutral"), unsafe_allow_html=True)
+            with row1[4]:
+                st.markdown(render_metric_card("ENDING BALANCE", f"₹{metrics.get('ending_balance', 0):,.0f}", 
+                    "positive" if metrics.get('ending_balance', 0) > metrics.get('actual_investment', 0) else "negative"), unsafe_allow_html=True)
+            with row1[5]:
+                st.markdown(render_metric_card("GROSS PNL", f"₹{metrics.get('gross_pnl', 0):,.0f}", 
+                    "positive" if metrics.get('gross_pnl', 0) > 0 else "negative"), unsafe_allow_html=True)
+            with row1[6]:
+                st.markdown(render_metric_card("GROSS PNL %", f"{metrics.get('gross_pnl_pct', 0):.1f}%", 
+                    "positive" if metrics.get('gross_pnl_pct', 0) > 0 else "negative"), unsafe_allow_html=True)
+            
+            # Row 2
+            row2 = st.columns(7)
+            with row2[0]:
+                st.markdown(render_metric_card("IRR", f"{metrics.get('irr', 0):.1f}%", 
+                    "positive" if metrics.get('irr', 0) > 0 else "negative"), unsafe_allow_html=True)
+            with row2[1]:
+                st.markdown(render_metric_card("CAGR", f"{metrics.get('cagr', 0):.1f}%",
                     "positive" if metrics.get('cagr', 0) > 0 else "negative"), unsafe_allow_html=True)
-            with mcols[2]:
+            with row2[2]:
                 st.markdown(render_metric_card("MAX DRAWDOWN", f"{metrics.get('max_drawdown', 0):.2f}%", "negative"), unsafe_allow_html=True)
-            with mcols[3]:
+            with row2[3]:
+                st.markdown(render_metric_card("AVG HOLDING", f"{metrics.get('avg_holding_period', 0):.0f} days", "neutral"), unsafe_allow_html=True)
+            with row2[4]:
+                st.markdown(render_metric_card("BROKERAGE PAID", f"₹{metrics.get('total_brokerage', 0):,.0f}", "negative"), unsafe_allow_html=True)
+            with row2[5]:
+                st.markdown(render_metric_card("NET PNL", f"₹{metrics.get('net_pnl', 0):,.0f}", 
+                    "positive" if metrics.get('net_pnl', 0) > 0 else "negative"), unsafe_allow_html=True)
+            with row2[6]:
+                st.markdown(render_metric_card("NET PNL %", f"{metrics.get('net_pnl_pct', 0):.1f}%", 
+                    "positive" if metrics.get('net_pnl_pct', 0) > 0 else "negative"), unsafe_allow_html=True)
+            
+            # Row 3
+            row3 = st.columns(7)
+            with row3[0]:
+                st.markdown(render_metric_card("TOTAL TURNOVER", f"₹{metrics.get('total_turnover', 0):,.0f}", "neutral"), unsafe_allow_html=True)
+            with row3[1]:
+                st.markdown(render_metric_card("CAPITAL TURNS", f"{metrics.get('capital_turns', 0):.1f}x", "neutral"), unsafe_allow_html=True)
+            with row3[2]:
                 st.markdown(render_metric_card("SHARPE", f"{metrics.get('sharpe', 0):.2f}",
                     "positive" if metrics.get('sharpe', 0) > 1 else "neutral"), unsafe_allow_html=True)
-            with mcols[4]:
-                st.markdown(render_metric_card("WIN RATE", f"{metrics.get('win_ratio', 0):.1f}%",
-                    "positive" if metrics.get('win_ratio', 0) > 50 else "neutral"), unsafe_allow_html=True)
-            with mcols[5]:
+            with row3[3]:
+                st.markdown(render_metric_card("SORTINO", f"{metrics.get('sortino', 0):.2f}",
+                    "positive" if metrics.get('sortino', 0) > 1 else "neutral"), unsafe_allow_html=True)
+            with row3[4]:
+                st.markdown(render_metric_card("CALMAR", f"{metrics.get('calmar', 0):.2f}",
+                    "positive" if metrics.get('calmar', 0) > 1 else "neutral"), unsafe_allow_html=True)
+            with row3[5]:
                 st.markdown(render_metric_card("PROFIT FACTOR", 
                     f"{metrics.get('profit_factor', 0):.2f}" if metrics.get('profit_factor', 0) != float('inf') else "∞",
                     "positive"), unsafe_allow_html=True)
+            with row3[6]:
+                st.markdown(render_metric_card("KELLY %", f"{metrics.get('kelly', 0):.1f}%", "neutral"), unsafe_allow_html=True)
             
             # Charts
             st.markdown('<div class="section-header">EQUITY CURVE</div>', unsafe_allow_html=True)
@@ -1947,20 +2050,70 @@ def main():
             with col2:
                 st.plotly_chart(create_monthly_heatmap(metrics), use_container_width=True)
             
+            # YoY Returns - Strategy vs Benchmark
+            st.markdown('<div class="section-header">YoY RETURNS - STRATEGY VS BENCHMARK</div>', unsafe_allow_html=True)
+            
+            yoy_returns = metrics.get('yoy_returns', {})
+            if yoy_returns and benchmark_df is not None and not benchmark_df.empty:
+                # Calculate benchmark YoY returns
+                bench_close = benchmark_df['Close'] if 'Close' in benchmark_df.columns else benchmark_df.iloc[:, 0]
+                bench_yoy = {}
+                for year in bench_close.index.year.unique():
+                    year_data = bench_close[bench_close.index.year == year]
+                    if len(year_data) > 1:
+                        bench_yoy[year] = ((year_data.iloc[-1] - year_data.iloc[0]) / year_data.iloc[0]) * 100
+                
+                # Build comparison table
+                yoy_data = []
+                all_years = sorted(set(list(yoy_returns.keys()) + list(bench_yoy.keys())))
+                for year in all_years:
+                    strat_ret = yoy_returns.get(year, 0)
+                    bench_ret = bench_yoy.get(year, 0)
+                    verdict = "✅ Beats Benchmark" if strat_ret > bench_ret else "❌ Below Benchmark"
+                    yoy_data.append({
+                        'Year': year,
+                        'Benchmark %': f"{bench_ret:.1f}",
+                        'Strategy %': f"{strat_ret:.1f}",
+                        'Verdict': verdict
+                    })
+                
+                if yoy_data:
+                    yoy_df = pd.DataFrame(yoy_data)
+                    
+                    # Style the dataframe
+                    def style_verdict(val):
+                        if '✅' in str(val):
+                            return 'color: #00ff88'
+                        elif '❌' in str(val):
+                            return 'color: #ff4757'
+                        return ''
+                    
+                    styled_yoy = yoy_df.style.applymap(style_verdict, subset=['Verdict'])
+                    st.dataframe(styled_yoy, use_container_width=True, hide_index=True)
+                    
+                    # Summary
+                    beats = len([v for v in yoy_data if '✅' in v['Verdict']])
+                    total = len(yoy_data)
+                    st.markdown(f"**Strategy beats benchmark in {beats}/{total} years ({beats/total*100:.0f}%)**")
+            elif yoy_returns:
+                # Show strategy returns only if no benchmark
+                yoy_data = [{'Year': year, 'Strategy %': f"{ret:.1f}"} for year, ret in sorted(yoy_returns.items())]
+                st.dataframe(pd.DataFrame(yoy_data), use_container_width=True, hide_index=True)
+            
             # Extended metrics
-            st.markdown('<div class="section-header">DETAILED METRICS</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">ADDITIONAL METRICS</div>', unsafe_allow_html=True)
             
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                st.markdown("**Returns Metrics**")
+                st.markdown("**Period Returns**")
                 returns_data = {
-                    'Metric': ['Total Return', 'CAGR', 'MTD', 'YTD', '3M', '6M', '1Y'],
-                    'Value': [
-                        f"{metrics.get('net_pnl_pct', 0):.2f}%", f"{metrics.get('cagr', 0):.2f}%",
-                        f"{metrics.get('mtd', 0):.2f}%", f"{metrics.get('ytd', 0):.2f}%",
-                        f"{metrics.get('3m', 0):.2f}%", f"{metrics.get('6m', 0):.2f}%",
-                        f"{metrics.get('1y', 0):.2f}%"
+                    'Period': ['MTD', 'YTD', '3 Month', '6 Month', '1 Year', '3 Year', '5 Year'],
+                    'Return %': [
+                        f"{metrics.get('mtd', 0):.2f}", f"{metrics.get('ytd', 0):.2f}",
+                        f"{metrics.get('3m', 0):.2f}", f"{metrics.get('6m', 0):.2f}",
+                        f"{metrics.get('1y', 0):.2f}", f"{metrics.get('3y', 0):.2f}",
+                        f"{metrics.get('5y', 0):.2f}"
                     ]
                 }
                 st.dataframe(pd.DataFrame(returns_data), hide_index=True, use_container_width=True)
@@ -1968,28 +2121,30 @@ def main():
             with col2:
                 st.markdown("**Risk Metrics**")
                 risk_data = {
-                    'Metric': ['Max Drawdown', 'Avg Drawdown', 'Longest DD', 'Annual Vol', 'Sharpe', 'Sortino', 'Calmar'],
+                    'Metric': ['Avg Drawdown', 'Longest DD', 'Annual Volatility', 'Skewness', 'Kurtosis'],
                     'Value': [
-                        f"{metrics.get('max_drawdown', 0):.2f}%", f"{metrics.get('avg_drawdown', 0):.2f}%",
-                        f"{metrics.get('longest_dd_days', 0)} days", f"{metrics.get('volatility_annual', 0):.2f}%",
-                        f"{metrics.get('sharpe', 0):.2f}", f"{metrics.get('sortino', 0):.2f}",
-                        f"{metrics.get('calmar', 0):.2f}"
+                        f"{metrics.get('avg_drawdown', 0):.2f}%",
+                        f"{metrics.get('longest_dd_days', 0)} days",
+                        f"{metrics.get('volatility_annual', 0):.2f}%",
+                        f"{metrics.get('skew', 0):.3f}",
+                        f"{metrics.get('kurtosis', 0):.3f}"
                     ]
                 }
                 st.dataframe(pd.DataFrame(risk_data), hide_index=True, use_container_width=True)
             
             with col3:
-                st.markdown("**Trade Statistics**")
-                trade_data = {
-                    'Metric': ['Total Trades', 'Win Rate', 'Profit Factor', 'Avg Win', 'Avg Loss', 'Best Trade', 'Worst Trade'],
+                st.markdown("**Trade Streaks**")
+                streak_data = {
+                    'Metric': ['Max Consec Wins', 'Max Consec Losses', 'Best Trade', 'Worst Trade', 'Time in Market'],
                     'Value': [
-                        str(metrics.get('total_trades', 0)), f"{metrics.get('win_ratio', 0):.1f}%",
-                        f"{metrics.get('profit_factor', 0):.2f}" if metrics.get('profit_factor', 0) != float('inf') else "∞",
-                        f"₹{metrics.get('avg_win', 0):,.0f}", f"₹{metrics.get('avg_loss', 0):,.0f}",
-                        f"₹{metrics.get('best_trade', 0):,.0f}", f"₹{metrics.get('worst_trade', 0):,.0f}"
+                        str(metrics.get('max_consec_wins', 0)),
+                        str(metrics.get('max_consec_losses', 0)),
+                        f"₹{metrics.get('best_trade', 0):,.0f}",
+                        f"₹{metrics.get('worst_trade', 0):,.0f}",
+                        f"{metrics.get('time_in_market', 0):.1f}%"
                     ]
                 }
-                st.dataframe(pd.DataFrame(trade_data), hide_index=True, use_container_width=True)
+                st.dataframe(pd.DataFrame(streak_data), hide_index=True, use_container_width=True)
             
             # Trade book
             st.markdown('<div class="section-header">TRADE BOOK</div>', unsafe_allow_html=True)
@@ -2216,7 +2371,7 @@ def main():
         <div style="text-align: center; padding: 20px; margin-top: 50px; border-top: 1px solid #1e293b;">
             <p style="color: #64748b; font-size: 12px; font-family: 'JetBrains Mono', monospace;">
                 Made with ❤️ by Stallions | ©2025 Stallions.in - All Rights Reserved<br>
-                <span style="color: #00d4ff;">Author: Ankit Gupta</span>
+                <span style="color: #00d4ff;">Author: Stallions</span>
             </p>
         </div>
     """, unsafe_allow_html=True)
