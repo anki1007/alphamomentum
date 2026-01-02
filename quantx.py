@@ -595,11 +595,14 @@ class MomentumShopBacktester:
         metrics['win_ratio'] = (metrics['winning_trades'] / metrics['total_trades'] * 100) if metrics['total_trades'] > 0 else 0
         
         # Financial metrics
-        metrics['actual_investment'] = trades_df['Capital'].sum()
+        metrics['initial_capital'] = self.initial_capital
+        metrics['total_turnover'] = trades_df['Capital'].sum()  # Total capital deployed across all trades
+        metrics['capital_turns'] = metrics['total_turnover'] / self.initial_capital if self.initial_capital > 0 else 0
         metrics['gross_pnl'] = trades_df['Pnl'].sum()
         metrics['total_brokerage'] = trades_df['Brokerage'].sum()
         metrics['net_pnl'] = trades_df['NetPnl'].sum()
         metrics['ending_balance'] = self.initial_capital + metrics['net_pnl']
+        metrics['moic'] = metrics['ending_balance'] / self.initial_capital if self.initial_capital > 0 else 0  # Multiple on Invested Capital
         metrics['gross_pnl_pct'] = (metrics['gross_pnl'] / self.initial_capital * 100)
         metrics['net_pnl_pct'] = (metrics['net_pnl'] / self.initial_capital * 100)
         
@@ -1874,7 +1877,7 @@ def main():
             # Top metrics row
             st.markdown("### 📊 Key Performance Metrics")
             
-            cols = st.columns(7)
+            cols = st.columns(8)
             
             with cols[0]:
                 st.markdown(create_metric_card(
@@ -1896,35 +1899,39 @@ def main():
             
             with cols[3]:
                 st.markdown(create_metric_card(
-                    "Actual Investment",
-                    f"₹{metrics.get('actual_investment', 0):,.0f}"
+                    "Initial Capital",
+                    f"₹{metrics.get('initial_capital', 0):,.0f}"
                 ), unsafe_allow_html=True)
             
             with cols[4]:
+                st.markdown(create_metric_card(
+                    "Total Turnover",
+                    f"₹{metrics.get('total_turnover', 0):,.0f}"
+                ), unsafe_allow_html=True)
+            
+            with cols[5]:
+                st.markdown(create_metric_card(
+                    "Capital Turns",
+                    f"{metrics.get('capital_turns', 0):.1f}x"
+                ), unsafe_allow_html=True)
+            
+            with cols[6]:
                 st.markdown(create_metric_card(
                     "Ending Balance",
                     f"₹{metrics.get('ending_balance', 0):,.0f}"
                 ), unsafe_allow_html=True)
             
-            with cols[5]:
-                gross_pnl = metrics.get('gross_pnl', 0)
+            with cols[7]:
+                moic = metrics.get('moic', 0)
                 st.markdown(create_metric_card(
-                    "Gross PnL",
-                    f"₹{gross_pnl:,.0f}",
-                    "metric-value-green" if gross_pnl >= 0 else "metric-value-red"
-                ), unsafe_allow_html=True)
-            
-            with cols[6]:
-                gross_pnl_pct = metrics.get('gross_pnl_pct', 0)
-                st.markdown(create_metric_card(
-                    "Gross PnL %",
-                    f"{gross_pnl_pct:.1f}%",
-                    "metric-value-green" if gross_pnl_pct >= 0 else "metric-value-red"
+                    "MOIC",
+                    f"{moic:.2f}x",
+                    "metric-value-green" if moic >= 1 else "metric-value-red"
                 ), unsafe_allow_html=True)
             
             # Secondary metrics row
             st.markdown("<br>", unsafe_allow_html=True)
-            cols2 = st.columns(7)
+            cols2 = st.columns(8)
             
             with cols2[0]:
                 st.markdown(f"""
@@ -1967,6 +1974,15 @@ def main():
                 """, unsafe_allow_html=True)
             
             with cols2[5]:
+                gross_pnl = metrics.get('gross_pnl', 0)
+                st.markdown(f"""
+                <div class="metric-card-secondary">
+                    <div class="metric-label-secondary">Gross PnL</div>
+                    <div class="{'metric-value-green' if gross_pnl >= 0 else 'metric-value-red'}">₹{gross_pnl:,.0f}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with cols2[6]:
                 net_pnl = metrics.get('net_pnl', 0)
                 st.markdown(f"""
                 <div class="metric-card-secondary">
@@ -1975,7 +1991,7 @@ def main():
                 </div>
                 """, unsafe_allow_html=True)
             
-            with cols2[6]:
+            with cols2[7]:
                 net_pnl_pct = metrics.get('net_pnl_pct', 0)
                 st.markdown(f"""
                 <div class="metric-card-secondary">
@@ -2246,7 +2262,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
