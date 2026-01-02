@@ -1711,7 +1711,7 @@ def render_header():
         <div class="terminal-header">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
-                    <h1 class="terminal-title">◆ STALLIONS QUANT TERMINAL</h1>
+                    <h1 class="terminal-title">📈 STALLIONS QUANT TERMINAL</h1>
                     <p class="terminal-subtitle">Institutional-Grade Mean Reversion Analytics • Midcap 50 Strategy • Author: Ankit Gupta</p>
                 </div>
                 <div class="live-indicator">
