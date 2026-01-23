@@ -3,6 +3,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -15,7 +16,7 @@ from plotly.subplots import make_subplots
 st.set_page_config(page_title="Indian Market Ratio Terminal", layout="wide")
 RATIO_MULTIPLIER = 1000
 
-# Custom CSS: Neon Title, 3D Tabs, Table Alignment Override
+# Custom CSS: Title, Tabs, Table Alignment and Sorting
 st.markdown(
     """
     <style>
@@ -48,7 +49,7 @@ st.markdown(
 
     /* 2. NEON 3D TABS - CENTERED */
     div[data-baseweb="tab-list"] { 
-        gap: 15px; 
+        gap: 20px; 
         background: transparent; 
         padding: 20px 0;
         display: flex;
@@ -58,9 +59,9 @@ st.markdown(
     button[data-baseweb="tab"] {
         background: linear-gradient(145deg, #1a1a1a, #222);
         color: #00f260;
-        border-radius: 6px;
+        border-radius: 8px;
         padding: 12px 25px;
-        font-size: 16px; 
+        font-size: 18px; 
         font-weight: 700;
         border: 1px solid #333;
         transition: all 0.2s ease;
@@ -105,6 +106,29 @@ st.markdown(
         font-weight: 700;
         border: 1px solid #333;
         font-size: 16px;
+        cursor: pointer;
+        user-select: none;
+        position: relative;
+    }
+    
+    .custom-table th:hover {
+        background-color: #353535;
+    }
+    
+    .custom-table th.sortable::after {
+        content: ' ⇅';
+        color: #666;
+        font-size: 12px;
+    }
+    
+    .custom-table th.sort-asc::after {
+        content: ' ▲';
+        color: #00f260;
+    }
+    
+    .custom-table th.sort-desc::after {
+        content: ' ▼';
+        color: #00f260;
     }
     
     .custom-table td {
@@ -161,10 +185,17 @@ st.markdown(
 # =========================================================
 SYMBOL_MASTER = [
     {"name":"NIFTY 50","yahoo":"^NSEI","industry":"NIFTY"},
+    {"name":"NIFTY NEXT 50","yahoo":"^NSMIDCP","industry":"NIFTY JR"},
     {"name":"NIFTY 100","yahoo":"^CNX100","industry":"LARGE CAP 100"},
     {"name":"NIFTY 200","yahoo":"^CNX200","industry":"LARGE MIDCAP 200"},
-    {"name":"NIFTY NEXT 50","yahoo":"^NSMIDCP","industry":"NIFTY JR"},
+    {"name":"NIFTY LARGE MIDCAP 250","yahoo":"NIFTY_LARGEMID250.NS","industry":"LARGE MIDCAP 250"},
     {"name":"NIFTY MIDCAP 50","yahoo":"^NSEMDCP50","industry":"MIDCAP 50"},
+    {"name":"NIFTY MIDCAP 100","yahoo":"NIFTY_MIDCAP_100.NS","industry":"MIDCAP 100"},
+    {"name":"NIFTY MIDCAP 150","yahoo":"NIFTYMIDCAP150.NS","industry":"MIDCAP 150"},
+    {"name":"NIFTY MID SMALLCAP 400","yahoo":"NIFTYMIDSML400.NS","industry":"MID SMALL CAP"},
+    {"name":"NIFTY SMALLCAP 100","yahoo":"^CNXSC","industry":"SMALL CAP"},
+    {"name":"NIFTY SMALLCAP 250","yahoo":"NIFTYSMLCAP250.NS","industry":"SMALL CAP"},
+    {"name":"NIFTY MICROCAP 250","yahoo":"NIFTY_MICROCAP250.NS","industry":"MICRO CAP"},
     {"name":"NIFTY 500","yahoo":"^CRSLDX","industry":"BROAD MARKET"},
     {"name":"NIFTY AUTO","yahoo":"^CNXAUTO","industry":"AUTO"},
     {"name":"NIFTY COMMODITIES","yahoo":"^CNXCMDT","industry":"COMMODITIES"},
@@ -189,15 +220,12 @@ SYMBOL_MASTER = [
     {"name":"NIFTY HEALTHCARE","yahoo":"NIFTY_HEALTHCARE.NS","industry":"HEALTHCARE"},
     {"name":"NIFTY INDIA DEFENCE","yahoo":"NIFTY_IND_DEFENCE.NS","industry":"DEFENCE"},
     {"name":"NIFTY DIGITAL","yahoo":"NIFTY_IND_DIGITAL.NS","industry":"DIGITAL"},
-    {"name":"NIFTY LARGE MIDCAP 250","yahoo":"NIFTY_LARGEMID250.NS","industry":"LARGE MIDCAP 250"},
-    {"name":"NIFTY MIDCAP 100","yahoo":"NIFTY_MIDCAP_100.NS","industry":"MIDCAP 100"},
     {"name":"NIFTY OIL AND GAS","yahoo":"NIFTY_OIL_AND_GAS.NS","industry":"OIL AND GAS"},
-    {"name":"NIFTY MIDCAP 150","yahoo":"NIFTYMIDCAP150.NS","industry":"MIDCAP 150"},
     {"name":"NIFTY PRIVATE BANK","yahoo":"NIFTYPVTBANK.NS","industry":"PRIVATE BANK"},
 ]
 
 ALL_NAMES = [s["name"] for s in SYMBOL_MASTER]
-BASE_INDEX = "NIFTY 500"
+BENCHMARK_INDEX = "NIFTY 500"
 
 # =========================================================
 # DATA FETCH
@@ -254,16 +282,124 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # =========================================================
-# HTML TABLE GENERATOR
+# HTML TABLE GENERATOR WITH SORTING
 # =========================================================
-def generate_html_table(df, left_align_cols=[]):
-    """Generate HTML table with proper alignment"""
-    html = '<div class="table-container"><table class="custom-table"><thead><tr>'
+def generate_sortable_table(df, left_align_cols=[], table_id="table"):
+    """Generate sortable HTML table with proper alignment"""
     
-    # Headers
-    for col in df.columns:
+    # Start HTML with complete styling
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <style>
+    body {
+        margin: 0;
+        padding: 0;
+        background-color: transparent;
+        font-family: Arial, sans-serif;
+    }
+    
+    .custom-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 15px;
+        background-color: #1e1e1e;
+        color: #e0e0e0;
+        margin: 0;
+    }
+    
+    .custom-table thead {
+        background-color: #2a2a2a;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+    
+    .custom-table th {
+        padding: 12px 8px;
+        text-align: center;
+        font-weight: 700;
+        border: 1px solid #333;
+        font-size: 16px;
+        cursor: pointer;
+        user-select: none;
+        position: relative;
+    }
+    
+    .custom-table th:hover {
+        background-color: #353535;
+    }
+    
+    .custom-table th.sortable::after {
+        content: ' ⇅';
+        color: #666;
+        font-size: 12px;
+    }
+    
+    .custom-table th.sort-asc::after {
+        content: ' ▲';
+        color: #00f260;
+    }
+    
+    .custom-table th.sort-desc::after {
+        content: ' ▼';
+        color: #00f260;
+    }
+    
+    .custom-table td {
+        padding: 10px 8px;
+        text-align: center;
+        border: 1px solid #333;
+        font-size: 15px;
+    }
+    
+    .custom-table th.left-align,
+    .custom-table td.left-align {
+        text-align: left !important;
+        padding-left: 20px !important;
+    }
+    
+    .custom-table tbody tr:hover {
+        background-color: #252525;
+    }
+    
+    .table-container {
+        max-height: 900px;
+        overflow-y: auto;
+        overflow-x: auto;
+        border: 1px solid #333;
+        border-radius: 5px;
+    }
+    
+    .table-container::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+    }
+    
+    .table-container::-webkit-scrollbar-track {
+        background: #1e1e1e;
+    }
+    
+    .table-container::-webkit-scrollbar-thumb {
+        background: #00f260;
+        border-radius: 5px;
+    }
+    
+    .table-container::-webkit-scrollbar-thumb:hover {
+        background: #0575e6;
+    }
+    </style>
+    </head>
+    <body>
+    """
+    
+    html += f'<div class="table-container"><table class="custom-table" id="{table_id}"><thead><tr>'
+    
+    # Headers with sortable class
+    for idx, col in enumerate(df.columns):
         align_class = 'left-align' if col in left_align_cols else ''
-        html += f'<th class="{align_class}">{col}</th>'
+        html += f'<th class="sortable {align_class}" onclick="sortTable({idx})">{col}</th>'
     html += '</tr></thead><tbody>'
     
     # Rows
@@ -276,6 +412,7 @@ def generate_html_table(df, left_align_cols=[]):
             # Format and color
             if pd.isna(value) or value == '-':
                 cell_content = '-'
+                cell_value = '-999999999'  # Sort to end
                 color = ''
             elif col in ['Trend']:
                 if value == 'Bullish':
@@ -285,13 +422,17 @@ def generate_html_table(df, left_align_cols=[]):
                 else:
                     color = ''
                 cell_content = value
+                cell_value = value
             elif col in ['Above 100', 'Above 200']:
                 if value == 'Yes':
                     color = 'style="color: #00ff99;"'
+                    cell_value = '1'  # For sorting
                 elif value == 'No':
                     color = 'style="color: #ff4d4d;"'
+                    cell_value = '0'  # For sorting
                 else:
                     color = ''
+                    cell_value = '-999999999'
                 cell_content = value
             elif col in ['Status']:
                 if value == 'STRONG BUY':
@@ -299,50 +440,114 @@ def generate_html_table(df, left_align_cols=[]):
                 else:
                     color = ''
                 cell_content = value
+                cell_value = value
             elif col.startswith('RS '):
                 try:
                     val = float(value)
                     color = f'style="color: {"#00ff99" if val > 0 else "#ff4d4d"};"'
                     cell_content = f'{val:.2f}'
+                    cell_value = val
                 except:
                     color = ''
                     cell_content = str(value)
-            elif col.startswith('EMA '):
+                    cell_value = -999999999
+            elif col.startswith('EMA ') or col.startswith('RSI '):
                 try:
                     val = float(value)
-                    # Get LTP from row
                     ltp = row.get('LTP', 0)
-                    color = f'style="color: {"#00ff99" if ltp > val else "#ff4d4d"};"'
+                    if col.startswith('EMA '):
+                        color = f'style="color: {"#00ff99" if ltp > val else "#ff4d4d"};"'
+                    else:  # RSI
+                        color = f'style="color: {"#00ff99" if val >= 50 else "#ff4d4d"};"'
                     cell_content = f'{val:.2f}'
+                    cell_value = val
                 except:
                     color = ''
                     cell_content = str(value)
-            elif col.startswith('RSI '):
-                try:
-                    val = float(value)
-                    color = f'style="color: {"#00ff99" if val >= 50 else "#ff4d4d"};"'
-                    cell_content = f'{val:.2f}'
-                except:
-                    color = ''
-                    cell_content = str(value)
+                    cell_value = -999999999
             elif col in ['SL No.', 'No']:
-                # Serial number - show as integer
                 try:
                     cell_content = str(int(value))
+                    cell_value = int(value)
                 except:
                     cell_content = str(value)
+                    cell_value = -999999999
                 color = ''
-            elif isinstance(value, (int, float)):
-                cell_content = f'{value:.2f}'
+            elif col in ['LTP', 'Ratio'] or isinstance(value, (int, float)):
+                try:
+                    val = float(value)
+                    cell_content = f'{val:.2f}'
+                    cell_value = val
+                except:
+                    cell_content = str(value)
+                    cell_value = -999999999
                 color = ''
             else:
                 cell_content = str(value)
+                cell_value = str(value)
                 color = ''
             
-            html += f'<td class="{align_class}" {color}>{cell_content}</td>'
+            html += f'<td class="{align_class}" {color} data-value="{cell_value}">{cell_content}</td>'
         html += '</tr>'
     
     html += '</tbody></table></div>'
+    
+    # Add JavaScript for sorting
+    html += f"""
+    <script>
+    function sortTable(columnIndex) {{
+        const table = document.getElementById('{table_id}');
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const header = table.querySelectorAll('th')[columnIndex];
+        
+        // Determine sort direction
+        let isAscending = true;
+        if (header.classList.contains('sort-asc')) {{
+            isAscending = false;
+        }}
+        
+        // Remove all sort classes
+        table.querySelectorAll('th').forEach(th => {{
+            th.classList.remove('sort-asc', 'sort-desc');
+        }});
+        
+        // Add appropriate class
+        if (isAscending) {{
+            header.classList.add('sort-asc');
+        }} else {{
+            header.classList.add('sort-desc');
+        }}
+        
+        // Sort rows
+        rows.sort((a, b) => {{
+            const aValue = a.querySelectorAll('td')[columnIndex].getAttribute('data-value');
+            const bValue = b.querySelectorAll('td')[columnIndex].getAttribute('data-value');
+            
+            // Try numeric comparison first
+            const aNum = parseFloat(aValue);
+            const bNum = parseFloat(bValue);
+            
+            if (!isNaN(aNum) && !isNaN(bNum)) {{
+                return isAscending ? aNum - bNum : bNum - aNum;
+            }}
+            
+            // Fall back to string comparison
+            if (isAscending) {{
+                return aValue.localeCompare(bValue);
+            }} else {{
+                return bValue.localeCompare(aValue);
+            }}
+        }});
+        
+        // Reattach rows
+        rows.forEach(row => tbody.appendChild(row));
+    }}
+    </script>
+    </body>
+    </html>
+    """
+    
     return html
 
 # =========================================================
@@ -445,7 +650,7 @@ with tab1:
             with c2:
                 num = st.selectbox("Numerator", ALL_NAMES, ALL_NAMES.index(sym), key=f"n1{i}")
             with c3:
-                den = st.selectbox("Benchmark", ALL_NAMES, ALL_NAMES.index(BASE_INDEX), key=f"d1{i}")
+                den = st.selectbox("Benchmark", ALL_NAMES, ALL_NAMES.index(BENCHMARK_INDEX), key=f"d1{i}")
             
             plot_ratio(num, den, rs_select)
 
@@ -461,14 +666,14 @@ with tab2:
             with c2:
                 num = st.selectbox("Numerator", ALL_NAMES, ALL_NAMES.index(sym), key=f"n2{i}")
             with c3:
-                den = st.selectbox("Benchmark", ALL_NAMES, ALL_NAMES.index(BASE_INDEX), key=f"d2{i}")
+                den = st.selectbox("Benchmark", ALL_NAMES, ALL_NAMES.index(BENCHMARK_INDEX), key=f"d2{i}")
             
             plot_ratio(num, den, rs_select)
 
 # -------- TAB 3: Analytics Table --------
 with tab3:
     st.subheader("Relative Strength Analytics")
-    base_name = st.selectbox("Select Base Index", ALL_NAMES, index=ALL_NAMES.index(BASE_INDEX))
+    base_name = st.selectbox("Select Base Index", ALL_NAMES, index=ALL_NAMES.index(BENCHMARK_INDEX))
     base_series = prices.get(base_name)
     
     rows = []
@@ -515,9 +720,14 @@ with tab3:
 
     df_an = pd.DataFrame(rows)
     
+    # Auto-sort by RS 252 (high to low)
     if not df_an.empty:
-        html_table = generate_html_table(df_an, left_align_cols=['Symbol', 'Industry'])
-        st.markdown(html_table, unsafe_allow_html=True)
+        # Convert RS 252 to numeric, handling '-' values
+        df_an['RS 252'] = pd.to_numeric(df_an['RS 252'], errors='coerce')
+        df_an = df_an.sort_values('RS 252', ascending=False, na_position='last')
+        
+        html_table = generate_sortable_table(df_an, left_align_cols=['Symbol', 'Industry'], table_id="analytics_table")
+        components.html(html_table, height=920, scrolling=True)
     else:
         st.warning("No data available.")
 
@@ -553,8 +763,36 @@ with tab4:
     df_tech = pd.DataFrame(rows)
 
     if not df_tech.empty:
-        html_table = generate_html_table(df_tech, left_align_cols=['Name', 'Industry'])
-        st.markdown(html_table, unsafe_allow_html=True)
+        # Calculate sort score: how many EMAs are below LTP + sum of RSI values
+        def calc_score(row):
+            if row['LTP'] == '-':
+                return -999999
+            
+            ltp = row['LTP']
+            ema_score = 0
+            rsi_score = 0
+            
+            # Count EMAs below LTP
+            for p in ema_periods:
+                ema_val = row.get(f'EMA {p}', '-')
+                if ema_val != '-' and ltp > ema_val:
+                    ema_score += 1
+            
+            # Sum RSI values
+            for p in rsi_periods:
+                rsi_val = row.get(f'RSI {p}', '-')
+                if rsi_val != '-':
+                    rsi_score += rsi_val
+            
+            # Combined score: EMA count * 10000 + RSI sum
+            return ema_score * 10000 + rsi_score
+        
+        df_tech['_sort_score'] = df_tech.apply(calc_score, axis=1)
+        df_tech = df_tech.sort_values('_sort_score', ascending=False)
+        df_tech = df_tech.drop('_sort_score', axis=1)
+        
+        html_table = generate_sortable_table(df_tech, left_align_cols=['Name', 'Industry'], table_id="tech_table")
+        components.html(html_table, height=920, scrolling=True)
 
 # -------- TAB 5: Opportunity Scanner --------
 with tab5:
@@ -568,7 +806,7 @@ with tab5:
         st.write("") 
         scan_btn = st.button("RUN HIGHLIGHT SCAN", type="primary", use_container_width=True)
     with col_base:
-        scan_base = st.selectbox("Benchmark for RS Check", ALL_NAMES, index=ALL_NAMES.index(BASE_INDEX), key="scan_base")
+        scan_base = st.selectbox("Benchmark for RS Check", ALL_NAMES, index=ALL_NAMES.index(BENCHMARK_INDEX), key="scan_base")
 
     if scan_btn:
         scan_results = []
@@ -618,7 +856,11 @@ with tab5:
             st.warning("No opportunities found matching strict criteria.")
         else:
             df_scan = pd.DataFrame(scan_results)
+            
+            # Auto-sort by RS 252 (high to low)
+            df_scan = df_scan.sort_values('RS 252', ascending=False)
+            
             st.success(f"Found {len(df_scan)} Opportunities!")
             
-            html_table = generate_html_table(df_scan, left_align_cols=['Symbol', 'Industry'])
-            st.markdown(html_table, unsafe_allow_html=True)
+            html_table = generate_sortable_table(df_scan, left_align_cols=['Symbol', 'Industry'], table_id="scan_table")
+            components.html(html_table, height=1080, scrolling=True)
