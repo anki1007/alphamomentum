@@ -20,161 +20,203 @@ RATIO_MULTIPLIER = 1000
 st.markdown(
     """
     <style>
-    /* 1. MASSIVE NEON TITLE - SINGLE LINE */
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@900&display=swap');
     
+    /* 1. MASSIVE NEON TITLE */
+    @keyframes pulse-title {
+        30% { text-shadow: 0 0 10px rgba(0, 255, 255, 0.5), 0 0 20px rgba(255, 0, 255, 0.5); }
+        30% { text-shadow: 0 0 30px rgba(0, 255, 255, 0.8), 0 0 50px rgba(255, 0, 255, 0.8), 0 0 70px rgba(255, 255, 255, 0.5); }
+        30% { text-shadow: 0 0 10px rgba(0, 255, 255, 0.5), 0 0 20px rgba(255, 0, 255, 0.5); }
+    }
+
     .neon-container {
         display: flex;
-        justify-content: center;
+        justify-content: flex-start; /* LEFT ALIGNMENT FOR MAIN TITLE */
         align-items: center;
-        padding: 30px 0;
+        padding: 40px 20px;
         width: 100%;
+        background: radial-gradient(circle at top left, rgba(20,20,20,0.8) 0%, rgba(0,0,0,0) 70%);
+        gap: 20px;
     }
     
     .neon-text {
         font-family: 'Orbitron', sans-serif;
-        font-size: 4vw !important;
-        font-weight: 500;
+        font-size: 3.5vw !important;
+        font-weight: 900;
         text-transform: uppercase;
         color: #fff;
-        text-align: center;
-        background: linear-gradient(90deg, #00f260, #0575e6);
+        text-align: left;
+        background: linear-gradient(90deg, #00ffff, #ff00ff);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        text-shadow: 0 0 20px rgba(0, 242, 96, 0.4), 0 0 30px rgba(5, 117, 230, 0.4);
+        animation: pulse-title 3s infinite;
         margin: 0;
         line-height: 1.2;
-        white-space: nowrap;
+        letter-spacing: 2px;
     }
 
-    /* 2. NEON 3D TABS - CENTERED */
+    /* NEON BOLT STYLE (ELECTRIC BLUE) */
+    .neon-bolt {
+        font-size: 3.5vw;
+        color: #00ffff;
+        text-shadow: 0 0 10px #00ffff, 0 0 20px #0099ff;
+        animation: pulse-bolt 1.5s infinite alternate;
+    }
+    
+    @keyframes pulse-bolt {
+        from { text-shadow: 0 0 10px #00ffff, 0 0 20px #00ffff; opacity: 0.8; }
+        to { text-shadow: 0 0 20px #00ffff, 0 0 40px #00ffff, 0 0 60px #fff; opacity: 1; }
+    }
+
+    /* 2. NEON 3D TABS */
     div[data-baseweb="tab-list"] { 
-        gap: 20px; 
+        gap: 25px; 
         background: transparent; 
-        padding: 20px 0;
+        padding: 30px 10px;
         display: flex;
         justify-content: center;
+        flex-wrap: wrap;
     }
     
     button[data-baseweb="tab"] {
-        background: linear-gradient(145deg, #1a1a1a, #222);
-        color: #00f260;
-        border-radius: 8px;
-        padding: 12px 25px;
-        font-size: 18px; 
-        font-weight: 700;
-        border: 1px solid #333;
-        transition: all 0.2s ease;
+        background: #121212;
+        border-radius: 12px;
+        padding: 15px 30px;
+        font-size: 22px !important; 
+        font-weight: 800;
+        border: 2px solid #333;
+        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
         font-family: 'Orbitron', sans-serif;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.5);
+        position: relative;
+        overflow: hidden;
     }
 
     button[data-baseweb="tab"]:hover {
-        background: #2a2a2a;
-        color: #fff;
-        border-color: #00f260;
-        box-shadow: 0 0 15px rgba(0, 242, 96, 0.4);
-    }
-
-    button[data-baseweb="tab"][aria-selected="true"] {
-        background: linear-gradient(90deg, #00f260, #0575e6);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        border: 1px solid #00f260;
-        box-shadow: inset 0 0 10px rgba(0, 242, 96, 0.2);
-    }
-    
-    /* 3. CUSTOM HTML TABLE STYLING */
-    .custom-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 15px;
-        background-color: #1e1e1e;
-        color: #e0e0e0;
-        margin: 20px 0;
-    }
-    
-    .custom-table thead {
-        background-color: #2a2a2a;
-        position: sticky;
-        top: 0;
-        z-index: 10;
-    }
-    
-    .custom-table th {
-        padding: 12px 8px;
-        text-align: center;
-        font-weight: 700;
-        border: 1px solid #333;
-        font-size: 16px;
-        cursor: pointer;
-        user-select: none;
-        position: relative;
-    }
-    
-    .custom-table th:hover {
-        background-color: #353535;
-    }
-    
-    .custom-table th.sortable::after {
-        content: ' ⇅';
-        color: #666;
-        font-size: 12px;
-    }
-    
-    .custom-table th.sort-asc::after {
-        content: ' ▲';
-        color: #00f260;
-    }
-    
-    .custom-table th.sort-desc::after {
-        content: ' ▼';
-        color: #00f260;
-    }
-    
-    .custom-table td {
-        padding: 10px 8px;
-        text-align: center;
-        border: 1px solid #333;
-        font-size: 15px;
-    }
-    
-    /* Left align for Symbol and Industry columns */
-    .custom-table th.left-align,
-    .custom-table td.left-align {
-        text-align: left !important;
-        padding-left: 20px !important;
-    }
-    
-    .custom-table tbody tr:hover {
-        background-color: #252525;
-    }
-    
-    .table-container {
-        max-height: 900px;
-        overflow-y: auto;
-        overflow-x: auto;
-        border: 1px solid #333;
-        border-radius: 5px;
-    }
-    
-    /* Scrollbar styling */
-    .table-container::-webkit-scrollbar {
-        width: 10px;
-        height: 10px;
-    }
-    
-    .table-container::-webkit-scrollbar-track {
+        transform: translateY(-3px) scale(1.02);
         background: #1e1e1e;
     }
     
-    .table-container::-webkit-scrollbar-thumb {
-        background: #00f260;
-        border-radius: 5px;
+    /* --- EMOJI RESET --- */
+    .emoji-style, 
+    button[data-baseweb="tab"] div[data-testid="stMarkdownContainer"] p::before {
+        font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+        font-weight: normal;
+        margin-right: 10px;
+        display: inline-block;
+        text-shadow: none !important; 
+        -webkit-text-fill-color: white !important;
+        color: white !important;
+        filter: none !important;
+        opacity: 1 !important;
     }
     
-    .table-container::-webkit-scrollbar-thumb:hover {
-        background: #0575e6;
+    .header-dart {
+        font-size: 3.0vw;
+        -webkit-text-fill-color: initial !important;
+        text-shadow: none !important;
+        filter: none !important;
     }
+
+    /* Tab 1: Market Ratio (Lime) */
+    button[data-baseweb="tab"]:nth-child(1) { color: #39ff14; border-bottom: 4px solid #39ff14; }
+    button[data-baseweb="tab"]:nth-child(1):hover { box-shadow: 0 0 20px rgba(57, 255, 20, 0.4); text-shadow: 0 0 8px #39ff14; }
+    button[data-baseweb="tab"]:nth-child(1)[aria-selected="true"] {
+        background: linear-gradient(180deg, rgba(57, 255, 20, 0.1), transparent);
+        border-color: #39ff14;
+        box-shadow: 0 0 25px rgba(57, 255, 20, 0.6);
+        color: #fff;
+        text-shadow: 0 0 10px #39ff14;
+    }
+    button[data-baseweb="tab"]:nth-child(1) div[data-testid="stMarkdownContainer"] p::before { content: "📈"; }
+
+    /* Tab 2: Sector Ratio (Orange) */
+    button[data-baseweb="tab"]:nth-child(2) { color: #ff6600; border-bottom: 4px solid #ff6600; }
+    button[data-baseweb="tab"]:nth-child(2):hover { box-shadow: 0 0 20px rgba(255, 102, 0, 0.4); text-shadow: 0 0 8px #ff6600; }
+    button[data-baseweb="tab"]:nth-child(2)[aria-selected="true"] {
+        background: linear-gradient(180deg, rgba(255, 102, 0, 0.1), transparent);
+        border-color: #ff6600;
+        box-shadow: 0 0 25px rgba(255, 102, 0, 0.6);
+        color: #fff;
+        text-shadow: 0 0 10px #ff6600;
+    }
+    button[data-baseweb="tab"]:nth-child(2) div[data-testid="stMarkdownContainer"] p::before { content: "🏭"; }
+
+    /* Tab 3: Analytics (Purple) */
+    button[data-baseweb="tab"]:nth-child(3) { color: #bc13fe; border-bottom: 4px solid #bc13fe; }
+    button[data-baseweb="tab"]:nth-child(3):hover { box-shadow: 0 0 20px rgba(188, 19, 254, 0.4); text-shadow: 0 0 8px #bc13fe; }
+    button[data-baseweb="tab"]:nth-child(3)[aria-selected="true"] {
+        background: linear-gradient(180deg, rgba(188, 19, 254, 0.1), transparent);
+        border-color: #bc13fe;
+        box-shadow: 0 0 25px rgba(188, 19, 254, 0.6);
+        color: #fff;
+        text-shadow: 0 0 10px #bc13fe;
+    }
+    button[data-baseweb="tab"]:nth-child(3) div[data-testid="stMarkdownContainer"] p::before { content: "📊"; }
+
+    /* Tab 4: Technical (Cyan) */
+    button[data-baseweb="tab"]:nth-child(4) { color: #00ffff; border-bottom: 4px solid #00ffff; }
+    button[data-baseweb="tab"]:nth-child(4):hover { box-shadow: 0 0 20px rgba(0, 255, 255, 0.4); text-shadow: 0 0 8px #00ffff; }
+    button[data-baseweb="tab"]:nth-child(4)[aria-selected="true"] {
+        background: linear-gradient(180deg, rgba(0, 255, 255, 0.1), transparent);
+        border-color: #00ffff;
+        box-shadow: 0 0 25px rgba(0, 255, 255, 0.6);
+        color: #fff;
+        text-shadow: 0 0 10px #00ffff;
+    }
+    button[data-baseweb="tab"]:nth-child(4) div[data-testid="stMarkdownContainer"] p::before { content: "📟"; }
+
+    /* Tab 5: Scanner (Pink) */
+    button[data-baseweb="tab"]:nth-child(5) { color: #ff1493; border-bottom: 4px solid #ff1493; }
+    button[data-baseweb="tab"]:nth-child(5):hover { box-shadow: 0 0 20px rgba(255, 20, 147, 0.4); text-shadow: 0 0 8px #ff1493; }
+    button[data-baseweb="tab"]:nth-child(5)[aria-selected="true"] {
+        background: linear-gradient(180deg, rgba(255, 20, 147, 0.1), transparent);
+        border-color: #ff1493;
+        box-shadow: 0 0 25px rgba(255, 20, 147, 0.6);
+        color: #fff;
+        text-shadow: 0 0 10px #ff1493;
+    }
+    button[data-baseweb="tab"]:nth-child(5) div[data-testid="stMarkdownContainer"] p::before { content: "🔍"; }
+    
+    /* 3. NEON SECTION TEXT STYLES - CENTERED */
+    .neon-header-wrapper {
+        display: flex;
+        justify-content: center; /* CENTER ALIGNMENT */
+        align-items: center;
+        gap: 15px;
+        margin-bottom: 20px;
+        padding-bottom: 10px;
+        font-family: 'Orbitron', sans-serif;
+        font-size: 28px;
+        font-weight: 700;
+        text-align: center;
+    }
+    
+    .border-gold { border-bottom: 1px solid rgba(255, 215, 0, 0.3); }
+    .border-blue { border-bottom: 1px solid rgba(0, 255, 255, 0.3); }
+    .border-lime { border-bottom: 1px solid rgba(57, 255, 20, 0.3); }
+
+    .neon-text-gold {
+        background: linear-gradient(90deg, #FFD700, #FFA500);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-shadow: 0 0 15px rgba(255, 215, 0, 0.5);
+    }
+
+    .neon-text-blue {
+        background: linear-gradient(90deg, #00ffff, #0099ff);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-shadow: 0 0 15px rgba(0, 255, 255, 0.5);
+    }
+    
+    .neon-text-lime {
+        background: linear-gradient(90deg, #39ff14, #32cd32);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-shadow: 0 0 15px rgba(57, 255, 20, 0.5);
+    }
+    
     </style>
     """,
     unsafe_allow_html=True
@@ -265,6 +307,7 @@ def ema(s, n):
 
 def safe_ratio(a, b):
     if a is None or b is None or a.empty or b.empty: return None
+    # Use position to calculate ratio to safely handle duplicates
     df = pd.concat([a, b], axis=1).dropna()
     if df.empty: return None
     return (df.iloc[:, 0] / df.iloc[:, 1]) * RATIO_MULTIPLIER
@@ -273,13 +316,20 @@ def rs_calc(r, n):
     return ((r / r.shift(n)) - 1) * 100
 
 def rsi(series, period=14):
+    # Safe check for flat line (Numer == Denom)
+    if series.nunique() <= 1:
+        return pd.Series(50, index=series.index)
+        
     delta = series.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
     avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+    
+    # Avoid zero division
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    res = 100 - (100 / (1 + rs))
+    return res.fillna(100) # If avg_loss was 0 (pure uptrend), RSI is 100
 
 # =========================================================
 # HTML TABLE GENERATOR WITH SORTING
@@ -287,12 +337,13 @@ def rsi(series, period=14):
 def generate_sortable_table(df, left_align_cols=[], table_id="table"):
     """Generate sortable HTML table with proper alignment"""
     
-    # Start HTML with complete styling
     html = """
     <!DOCTYPE html>
     <html>
     <head>
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap');
+    
     body {
         margin: 0;
         padding: 0;
@@ -302,56 +353,72 @@ def generate_sortable_table(df, left_align_cols=[], table_id="table"):
     
     .custom-table {
         width: 100%;
-        border-collapse: collapse;
+        border-collapse: separate;
+        border-spacing: 0;
         font-size: 15px;
-        background-color: #1e1e1e;
+        background-color: #121212;
         color: #e0e0e0;
         margin: 0;
+        border: 1px solid #333;
     }
     
     .custom-table thead {
-        background-color: #2a2a2a;
+        background-color: #1a1a1a;
         position: sticky;
         top: 0;
         z-index: 10;
     }
     
+    /* MODIFIED TABLE HEADERS - MAGENTA/PURPLE GRADIENT */
     .custom-table th {
-        padding: 12px 8px;
+        padding: 15px 10px;
         text-align: center;
-        font-weight: 700;
-        border: 1px solid #333;
-        font-size: 16px;
+        border-bottom: 2px solid #ff00ff;
+        border-right: 1px solid #333;
+        font-size: 14px;
         cursor: pointer;
         user-select: none;
         position: relative;
+        font-family: 'Orbitron', sans-serif;
+        
+        /* Neon Magenta/Purple Gradient Text */
+        background: linear-gradient(90deg, #ff00ff, #8b00ff);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-shadow: 0 0 10px rgba(255, 0, 255, 0.3);
+        
+        transition: all 0.2s ease;
     }
     
     .custom-table th:hover {
-        background-color: #353535;
+        background-color: #252525;
+        text-shadow: 0 0 14px rgba(255, 0, 255, 0.7);
+        transform: scale(1.02);
     }
     
     .custom-table th.sortable::after {
         content: ' ⇅';
-        color: #666;
+        -webkit-text-fill-color: #ffcc00; /* Yellow */
         font-size: 12px;
+        padding-left: 5px;
     }
     
     .custom-table th.sort-asc::after {
         content: ' ▲';
-        color: #00f260;
+        -webkit-text-fill-color: #00f260;
     }
     
     .custom-table th.sort-desc::after {
         content: ' ▼';
-        color: #00f260;
+        -webkit-text-fill-color: #ff4d4d;
     }
     
     .custom-table td {
-        padding: 10px 8px;
+        padding: 12px 8px;
         text-align: center;
-        border: 1px solid #333;
-        font-size: 15px;
+        border-bottom: 1px solid #333;
+        border-right: 1px solid #333;
+        font-size: 10px;
     }
     
     .custom-table th.left-align,
@@ -361,7 +428,8 @@ def generate_sortable_table(df, left_align_cols=[], table_id="table"):
     }
     
     .custom-table tbody tr:hover {
-        background-color: #252525;
+        background-color: #1f1f1f;
+        box-shadow: inset 0 0 10px rgba(255, 255, 255, 0.05);
     }
     
     .table-container {
@@ -369,25 +437,28 @@ def generate_sortable_table(df, left_align_cols=[], table_id="table"):
         overflow-y: auto;
         overflow-x: auto;
         border: 1px solid #333;
-        border-radius: 5px;
+        border-radius: 8px;
+        box-shadow: 0 0 20px rgba(0,0,0,0.5);
     }
     
+    /* Scrollbar styling */
     .table-container::-webkit-scrollbar {
-        width: 10px;
-        height: 10px;
+        width: 12px;
+        height: 12px;
     }
     
     .table-container::-webkit-scrollbar-track {
-        background: #1e1e1e;
+        background: #121212;
     }
     
     .table-container::-webkit-scrollbar-thumb {
-        background: #00f260;
-        border-radius: 5px;
+        background: linear-gradient(180deg, #ff00ff, #8b00ff);
+        border-radius: 6px;
+        border: 2px solid #121212;
     }
     
     .table-container::-webkit-scrollbar-thumb:hover {
-        background: #0575e6;
+        background: #ff00ff;
     }
     </style>
     </head>
@@ -561,7 +632,7 @@ def draw_colored_vectorized(fig, x, y, cond, width, row, name):
     fig.add_trace(go.Scatter(x=x, y=y_green, mode="lines", line=dict(color="#00ff99", width=width), name=f"{name} (Bullish)", showlegend=False), row=row, col=1)
     fig.add_trace(go.Scatter(x=x, y=y_red, mode="lines", line=dict(color="#ff4d4d", width=width), name=f"{name} (Bearish)", showlegend=False), row=row, col=1)
 
-def plot_ratio(numerator, denominator, rs_periods):
+def plot_ratio(numerator, denominator, rs_periods, chart_key):
     r = safe_ratio(prices[numerator], prices[denominator])
     if r is None:
         st.warning(f"Unable to calculate ratio: Data missing for {numerator} or {denominator}")
@@ -626,19 +697,32 @@ def plot_ratio(numerator, denominator, rs_periods):
     fig.update_yaxes(showgrid=True, gridcolor="#333", tickfont=dict(size=13))
     fig.update_annotations(font=dict(size=18, color="#ffffff", weight="bold"))
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=chart_key)
 
 # =========================================================
 # UI
 # =========================================================
-st.markdown("### 🎯")
-st.markdown('<div class="neon-container"><div class="neon-text">INDIAN MARKET RATIO TERMINAL</div></div>', unsafe_allow_html=True)
-
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["📈 Market Ratios", "🏭 Sector Ratios", "📊 Analytics Table", "📟 Technical Dashboard", "🔍 Opportunity Scanner"]
+st.markdown("### ")
+# UPDATED HEADER: Left Aligned, Dart + Electric Bolts
+st.markdown(
+    """
+    <div class="neon-container">
+        <span class="header-dart emoji-style">🎯</span>
+        <span class="neon-bolt">⚡</span>
+        <div class="neon-text">INDIAN MARKET RATIO TERMINAL</div>
+        <span class="neon-bolt">⚡</span>
+    </div>
+    """, 
+    unsafe_allow_html=True
 )
 
-# -------- TAB 1: Market Ratios --------
+# NOTE: Emojis are removed here to prevent tab styling interference. 
+# They are re-injected via CSS.
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["Market Ratios", "Sector Ratios", "Analytics Table", "Technical Dashboard", "Opportunity Scanner"]
+)
+
+# -------- TAB 1: Market Ratios (Lime) --------
 with tab1:
     defaults = ["NIFTY 50", "NIFTY NEXT 50", "NIFTY 100", "NIFTY 200"]
     cols = st.columns(2) + st.columns(2)
@@ -652,9 +736,10 @@ with tab1:
             with c3:
                 den = st.selectbox("Benchmark", ALL_NAMES, ALL_NAMES.index(BENCHMARK_INDEX), key=f"d1{i}")
             
-            plot_ratio(num, den, rs_select)
+            # Pass unique key to resolve Duplicate Element ID error
+            plot_ratio(num, den, rs_select, chart_key=f"chart_mk_ratio_{i}")
 
-# -------- TAB 2: Sector Ratios --------
+# -------- TAB 2: Sector Ratios (Orange) --------
 with tab2:
     defaults = ["NIFTY BANK", "NIFTY AUTO", "NIFTY IT", "NIFTY PHARMA"]
     cols = st.columns(2) + st.columns(2)
@@ -668,11 +753,13 @@ with tab2:
             with c3:
                 den = st.selectbox("Benchmark", ALL_NAMES, ALL_NAMES.index(BENCHMARK_INDEX), key=f"d2{i}")
             
-            plot_ratio(num, den, rs_select)
+            # Pass unique key to resolve Duplicate Element ID error
+            plot_ratio(num, den, rs_select, chart_key=f"chart_sec_ratio_{i}")
 
-# -------- TAB 3: Analytics Table --------
+# -------- TAB 3: Analytics Table (Purple) --------
 with tab3:
-    st.subheader("Relative Strength Analytics")
+    # Emoji separate from neon text
+    st.markdown('<div class="neon-header-wrapper border-gold"><span class="emoji-style">📊</span> <span class="neon-text-gold">Relative Strength Analytics</span></div>', unsafe_allow_html=True)
     base_name = st.selectbox("Select Base Index", ALL_NAMES, index=ALL_NAMES.index(BENCHMARK_INDEX))
     base_series = prices.get(base_name)
     
@@ -731,8 +818,10 @@ with tab3:
     else:
         st.warning("No data available.")
 
-# -------- TAB 4: Technical Dashboard --------
+# -------- TAB 4: Technical Dashboard (Cyan) --------
 with tab4:
+    # Emoji separate from neon text
+    st.markdown('<div class="neon-header-wrapper border-blue"><span class="emoji-style">📟</span> <span class="neon-text-blue">Multi-Timeframe Technical Dashboard</span></div>', unsafe_allow_html=True)
     ema_periods = [5, 9, 21, 30, 52, 75, 88, 125, 137, 208, 252]
     rsi_periods = [5, 9, 14, 21, 30, 52, 75, 88, 125, 137, 208, 252]
 
@@ -794,10 +883,11 @@ with tab4:
         html_table = generate_sortable_table(df_tech, left_align_cols=['Name', 'Industry'], table_id="tech_table")
         components.html(html_table, height=920, scrolling=True)
 
-# -------- TAB 5: Opportunity Scanner --------
+# -------- TAB 5: Opportunity Scanner (Pink) --------
 with tab5:
-    st.markdown("### 🔍 Opportunity Scanner")
-    st.markdown("Find indices where **LTP > EMA(200, 100, 50, 21)** AND **RS Ratio(252, 126, 63, 21) > 0**")
+    # Emoji separate from neon text
+    st.markdown('<div class="neon-header-wrapper border-lime"><span class="emoji-style">🔍</span> <span class="neon-text-lime">Opportunity Scanner</span></div>', unsafe_allow_html=True)
+    #st.markdown("Find indices where **LTP > EMA(200, 100, 50, 21)** AND **RS Ratio(252, 126, 63, 21) > 0**")
     
     col_scan, col_base = st.columns([1, 2])
     
@@ -863,4 +953,4 @@ with tab5:
             st.success(f"Found {len(df_scan)} Opportunities!")
             
             html_table = generate_sortable_table(df_scan, left_align_cols=['Symbol', 'Industry'], table_id="scan_table")
-            components.html(html_table, height=1080, scrolling=True)
+            components.html(html_table, height=600, scrolling=True)
