@@ -278,7 +278,7 @@ def fetch_all_prices():
     # Get today's date for fetching latest data
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
     try:
-        df = yf.download(tickers, start="2016-01-01", end=end_date, group_by='ticker', progress=False, auto_adjust=True, threads=True)
+        df = yf.download(tickers, start="2000-01-01", end=end_date, group_by='ticker', progress=False, auto_adjust=True, threads=True)
     except Exception as e:
         st.error(f"Critical Download Error: {e}")
         return {}
@@ -700,8 +700,96 @@ def plot_ratio(numerator, denominator, rs_periods, chart_key):
     # Handle NaN from shift by filling with False for first value
     prev_day_cond = (r >= r.shift(1)).fillna(False)
     draw_colored_vectorized(fig, r.index, r.values, prev_day_cond, 3, 1, "Ratio")
+    
+    # EMA 200 - Green when ratio > EMA 200, Red when ratio < EMA 200
+    # Draw as smooth continuous line by grouping same-color segments
     e200 = ema(r, 200)
-    draw_colored_vectorized(fig, r.index, e200.values, r > e200, 3, 1, "EMA 200")
+    e200_cond = r > e200  # Green when ratio above EMA 200
+    
+    # Convert to arrays for easier handling
+    e200_cond_arr = e200_cond.values
+    x_arr = r.index.values if hasattr(r.index, 'values') else np.array(r.index)
+    y_arr = e200.values
+    
+    # Group consecutive points with same color
+    i = 0
+    while i < len(e200_cond_arr):
+        current_color = e200_cond_arr[i]
+        start_idx = i
+        
+        # Find where color changes
+        while i < len(e200_cond_arr) and e200_cond_arr[i] == current_color:
+            i += 1
+        
+        end_idx = i
+        
+        # Include one extra point for smooth connection
+        if end_idx < len(e200_cond_arr):
+            x_segment = x_arr[start_idx:end_idx + 1]
+            y_segment = y_arr[start_idx:end_idx + 1]
+        else:
+            x_segment = x_arr[start_idx:end_idx]
+            y_segment = y_arr[start_idx:end_idx]
+        
+        color = "#00ff99" if current_color else "#ff4d4d"
+        
+        fig.add_trace(
+            go.Scatter(
+                x=x_segment,
+                y=y_segment,
+                mode="lines",
+                line=dict(color=color, width=2),
+                name="EMA 200",
+                showlegend=False,
+                hovertemplate='<b>Date:</b> %{x|%Y-%m-%d}<br><b>EMA 200:</b> %{y:.2f}<extra></extra>'
+            ),
+            row=1,
+            col=1
+        )
+    
+    # EMA 100 - Neon Yellow when ratio > EMA 100, Red when ratio < EMA 100
+    e100 = ema(r, 100)
+    e100_cond = r > e100
+    
+    # Convert to arrays
+    e100_cond_arr = e100_cond.values
+    y100_arr = e100.values
+    
+    # Group consecutive points with same color
+    i = 0
+    while i < len(e100_cond_arr):
+        current_color = e100_cond_arr[i]
+        start_idx = i
+        
+        # Find where color changes
+        while i < len(e100_cond_arr) and e100_cond_arr[i] == current_color:
+            i += 1
+        
+        end_idx = i
+        
+        # Include one extra point for smooth connection
+        if end_idx < len(e100_cond_arr):
+            x_segment = x_arr[start_idx:end_idx + 1]
+            y_segment = y100_arr[start_idx:end_idx + 1]
+        else:
+            x_segment = x_arr[start_idx:end_idx]
+            y_segment = y100_arr[start_idx:end_idx]
+        
+        color = "#ffff00" if current_color else "#ff4d4d"
+        
+        fig.add_trace(
+            go.Scatter(
+                x=x_segment,
+                y=y_segment,
+                mode="lines",
+                line=dict(color=color, width=2),
+                name="EMA 100",
+                showlegend=False,
+                hovertemplate='<b>Date:</b> %{x|%Y-%m-%d}<br><b>EMA 100:</b> %{y:.2f}<extra></extra>'
+            ),
+            row=1,
+            col=1
+        )
 
     # RS Charts
     rs_annotations = []
@@ -717,7 +805,7 @@ def plot_ratio(numerator, denominator, rs_periods, chart_key):
                 rs_min = rs_line.min()
                 rs_max = rs_line.max()
                 # Add 10% padding to top and bottom
-                padding = (rs_max - rs_min) * 0.25
+                padding = (rs_max - rs_min) * 0.1
                 fig.update_yaxes(
                     range=[rs_min - padding, rs_max + padding],
                     row=row_idx, 
@@ -729,11 +817,13 @@ def plot_ratio(numerator, denominator, rs_periods, chart_key):
     rs_text_block = "<br>" + "<br>".join(rs_annotations) if rs_annotations else ""
     
     fig.add_annotation(
-        xref="paper", yref="paper", x=0.01, y=0.98,
-        text=(f"<b>{numerator} / {denominator}</b> : {r.iloc[-1]:.2f}<br><b>EMA 200</b> : {e200.iloc[-1]:.2f}" + rs_text_block),
+        xref="paper", yref="paper",  # Use paper coordinates so it stays fixed when zooming
+        x=0.01, y=0.98,  # Position at top-left corner (1% from left, 98% from bottom)
+        text=(f"<b>{numerator} / {denominator}</b> : {r.iloc[-1]:.2f}<br><b>EMA 100</b> : {e100.iloc[-1]:.2f}<br><b>EMA 200</b> : {e200.iloc[-1]:.2f}" + rs_text_block),
         showarrow=False, align="left", 
         font=dict(size=16, color="white", family="Arial Black"), 
-        bgcolor="rgba(0,0,0,0.75)", bordercolor="#888", borderwidth=2
+        bgcolor="rgba(0,0,0,0.75)", bordercolor="#888", borderwidth=2,
+        xanchor="left", yanchor="top"
     )
 
     fig.update_layout(
@@ -835,12 +925,12 @@ with tab3:
                 continue
             
             r = safe_ratio(ps, base_series)
-            if r is None or r.empty or len(r) < 252:  # Need at least 252 data points for RS 252
+            if r is None or r.empty:
                 rows.append({
                     "SL No.": i,
                     "Symbol": s["name"],
                     "Industry": s["industry"],
-                    "Status": "INSUFFICIENT DATA",
+                    "Status": "NO RATIO DATA",
                     "Ratio": "-",
                     "Above 100": "-",
                     "Above 200": "-",
@@ -852,31 +942,73 @@ with tab3:
                 })
                 continue
             
-            ema100 = ema(r, 100)
-            ema200 = ema(r, 200)
-            
-            # Calculate RS values with validation
+            # Calculate EMAs with available data
             try:
-                rs21_val = rs_calc(r, 21).iloc[-1] if len(r) >= 21 else None
-                rs63_val = rs_calc(r, 63).iloc[-1] if len(r) >= 63 else None
-                rs126_val = rs_calc(r, 126).iloc[-1] if len(r) >= 126 else None
-                rs252_val = rs_calc(r, 252).iloc[-1] if len(r) >= 252 else None
+                ema100 = ema(r, 100)
+                ema200 = ema(r, 200)
+                ratio_val = r.iloc[-1]
+                
+                # Check if we have enough data for EMA comparisons
+                if len(r) >= 200 and not ema200.empty:
+                    above_100 = "Yes" if ratio_val > ema100.iloc[-1] else "No"
+                    above_200 = "Yes" if ratio_val > ema200.iloc[-1] else "No"
+                    trend = "Bullish" if ratio_val > ema200.iloc[-1] else "Bearish"
+                elif len(r) >= 100 and not ema100.empty:
+                    above_100 = "Yes" if ratio_val > ema100.iloc[-1] else "No"
+                    above_200 = "-"
+                    trend = "-"
+                else:
+                    above_100 = "-"
+                    above_200 = "-"
+                    trend = "-"
             except:
-                rs21_val = rs63_val = rs126_val = rs252_val = None
+                ratio_val = r.iloc[-1]
+                above_100 = "-"
+                above_200 = "-"
+                trend = "-"
+            
+            # Calculate RS values with validation (only if enough data)
+            try:
+                rs21_val = rs_calc(r, 21).iloc[-1] if len(r) > 21 else "-"
+                if rs21_val != "-" and pd.isna(rs21_val):
+                    rs21_val = "-"
+            except:
+                rs21_val = "-"
+                
+            try:
+                rs63_val = rs_calc(r, 63).iloc[-1] if len(r) > 63 else "-"
+                if rs63_val != "-" and pd.isna(rs63_val):
+                    rs63_val = "-"
+            except:
+                rs63_val = "-"
+                
+            try:
+                rs126_val = rs_calc(r, 126).iloc[-1] if len(r) > 126 else "-"
+                if rs126_val != "-" and pd.isna(rs126_val):
+                    rs126_val = "-"
+            except:
+                rs126_val = "-"
+                
+            try:
+                rs252_val = rs_calc(r, 252).iloc[-1] if len(r) > 252 else "-"
+                if rs252_val != "-" and pd.isna(rs252_val):
+                    rs252_val = "-"
+            except:
+                rs252_val = "-"
 
             rows.append({
                 "SL No.": i,
                 "Symbol": s["name"],
                 "Industry": s["industry"],
                 "Status": "OK",
-                "Ratio": r.iloc[-1],
-                "Above 100": "Yes" if r.iloc[-1] > ema100.iloc[-1] else "No",
-                "Above 200": "Yes" if r.iloc[-1] > ema200.iloc[-1] else "No",
-                "Trend": "Bullish" if r.iloc[-1] > ema200.iloc[-1] else "Bearish",
-                "RS 21": rs21_val if rs21_val is not None and not pd.isna(rs21_val) else "-",
-                "RS 63": rs63_val if rs63_val is not None and not pd.isna(rs63_val) else "-",
-                "RS 126": rs126_val if rs126_val is not None and not pd.isna(rs126_val) else "-",
-                "RS 252": rs252_val if rs252_val is not None and not pd.isna(rs252_val) else "-",
+                "Ratio": ratio_val,
+                "Above 100": above_100,
+                "Above 200": above_200,
+                "Trend": trend,
+                "RS 21": rs21_val,
+                "RS 63": rs63_val,
+                "RS 126": rs126_val,
+                "RS 252": rs252_val,
             })
 
     df_an = pd.DataFrame(rows)
@@ -910,8 +1042,8 @@ with tab4:
             rows.append(row)
             continue
         
-        # Check if we have enough data points
-        if len(series) < 10:  # Need at least 10 data points
+        # Only need at least 5 data points to calculate something
+        if len(series) < 5:
             row = { "SL No.": i, "Name": s["name"], "Industry": s["industry"], "LTP": "-" }
             for p in ema_periods: row[f"EMA {p}"] = "-"
             for p in rsi_periods: row[f"RSI {p}"] = "-"
@@ -923,7 +1055,7 @@ with tab4:
 
         for p in ema_periods:
             # Check if we have enough data for this EMA period
-            if len(series) >= p:
+            if len(series) > p:  # Need more than period for proper calculation
                 try:
                     ema_val = ema(series, p)
                     if not ema_val.empty and not pd.isna(ema_val.iloc[-1]):
@@ -938,7 +1070,7 @@ with tab4:
 
         for p in rsi_periods:
             # Check if we have enough data for this RSI period
-            if len(series) >= p + 1:  # Need at least period+1 for diff calculation
+            if len(series) > p + 1:  # Need more than period+1 for diff calculation
                 try:
                     rsi_val = rsi(series, p)
                     if not rsi_val.empty and not pd.isna(rsi_val.iloc[-1]):
