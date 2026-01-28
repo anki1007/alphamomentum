@@ -1195,7 +1195,5 @@ with tab5:
             html_table = generate_sortable_table(df_scan, left_align_cols=['Symbol', 'Industry'], table_id="scan_table")
             components.html(html_table, height=600, scrolling=True)
 
-# FOOTER LINE
-st.markdown("""<div class="footer">Made with ❤️ by <b>Stallions</b> | ©2026 Stallions - All Rights Reserved</div>""", text_alignment="center",unsafe_allow_html=True)
-
-
+# FOOTER LINE (FIXED)
+st.markdown("""<div style="text-align: center; padding: 20px; color: #888; font-size: 14px;">Made with ❤️ by <b>Stallions</b> | ©2026 Stallions - All Rights Reserved</div>""", unsafe_allow_html=True)
