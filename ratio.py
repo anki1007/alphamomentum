@@ -850,7 +850,7 @@ st.markdown(
     <div class="neon-container">
         <span class="header-dart emoji-style">🎯</span>
         <span class="neon-bolt">⚡</span>
-        <div class="neon-text">RATIO BREADTH ANALYIS DASHBOARD</div>
+        <div class="neon-text">RATIO BREADTH ANALYIS</div>
         <span class="neon-bolt">⚡</span>
     </div>
     """, 
@@ -1197,4 +1197,5 @@ with tab5:
 
 # FOOTER LINE
 st.markdown("""<div class="footer">Made with ❤️ by <b>Stallions</b> | ©2026 Stallions - All Rights Reserved</div>""", text_alignment="center",unsafe_allow_html=True)
+
 
