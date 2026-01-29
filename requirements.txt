@@ -10,6 +10,6 @@ openpyxl
 requests
 openpyxl
 quantstats
-pypfopt
+pyportfolioopt
 scikit-learn
 scipy
