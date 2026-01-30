@@ -2,7 +2,7 @@
 Quant ETFs Momentum Dashboard
 =============================
 
-Portfolio Optimization Methods (PyPortfolioOpt):-
+Portfolio Optimization Methods (PyPortfolioOpt):
 - Mean-Variance Optimization (MVO) - Maximize Sharpe
 - Tangency Portfolio (CAL) - Optimal Risky + Risk-Free allocation
 - Global Minimum Variance (GMVP) - Minimize volatility
@@ -21,6 +21,7 @@ Rebalance Frequencies:
 - Monthly - End of month
 - Quarterly - End of quarter
 
+Install: pip install streamlit yfinance pandas numpy plotly quantstats pypfopt scikit-learn
 """
 
 import streamlit as st
@@ -406,10 +407,13 @@ def fetch_data(tickers: List[str], start: str, end: str) -> Tuple[pd.DataFrame, 
             
             logger.info(f"Fetched {len(successful)} assets, date range: {df.index.min()} to {df.index.max()}")
             
-           df = df.ffill(limit=5)
+            # CRITICAL: Don't drop any rows! Keep NaNs for dynamic backtest
+            # Only forward fill small gaps (weekends/holidays)
+            df = df.ffill(limit=5)
             
+            # Log limited history ETFs
             if limited_history:
-            logger.info(f"ETFs with limited history: {limited_history}")
+                logger.info(f"ETFs with limited history: {limited_history}")
             
             return df, failed
         return pd.DataFrame(), failed
@@ -418,7 +422,7 @@ def fetch_data(tickers: List[str], start: str, end: str) -> Tuple[pd.DataFrame, 
         return pd.DataFrame(), validated
 
 def fetch_benchmark(ticker: str, start: str, end: str) -> pd.Series:
-    """Fetch benchmark data."""
+    """Fetch benchmark data. No caching to ensure fresh data."""
     try:
         raw = yf.download(ticker, start=start, end=end, progress=False)
         return raw['Close'].dropna() if not raw.empty else pd.Series()
@@ -462,26 +466,28 @@ def optimize_upi(returns: pd.DataFrame, rf: float = 0.065) -> Dict[str, float]:
         vol = rets.std() * np.sqrt(252)
         ui = calculate_ulcer_index(rets)
         
-        # UPI
+        # Individual UPI
         asset_upi[col] = (ann_ret - rf) / ui if ui > 0 else 0
-        # Sharpe
+        # Individual Sharpe
         asset_sharpe[col] = (ann_ret - rf) / vol if vol > 0 else 0
     
-    # Quality score
+    # Create quality score (blend of UPI and Sharpe)
+    # Normalize scores
     upi_vals = np.array(list(asset_upi.values()))
     sharpe_vals = np.array(list(asset_sharpe.values()))
     
+    # Handle edge cases
     upi_min, upi_max = upi_vals.min(), upi_vals.max()
     sharpe_min, sharpe_max = sharpe_vals.min(), sharpe_vals.max()
     
     upi_norm = (upi_vals - upi_min) / (upi_max - upi_min + 1e-6)
     sharpe_norm = (sharpe_vals - sharpe_min) / (sharpe_max - sharpe_min + 1e-6)
     
-    # Combined Quality score
+    # Combined quality score: 50% UPI + 50% Sharpe
     quality_scores = 0.5 * upi_norm + 0.5 * sharpe_norm
     quality_dict = {assets[i]: quality_scores[i] for i in range(n_assets)}
     
-    # Optimize with quality-aware objective
+    # Stage 2: Optimize with quality-aware objective
     def quality_weighted_neg_upi(weights):
         port_returns = returns.dot(weights)
         port_upi = ulcer_performance_index(port_returns, rf)
@@ -493,7 +499,7 @@ def optimize_upi(returns: pd.DataFrame, rf: float = 0.065) -> Dict[str, float]:
         combined = 0.7 * port_upi + 0.3 * quality_alignment * 10  # Scale quality component
         return -combined
     
-    # High quality assets get higher max allocation
+    # Set bounds based on quality - high quality assets get higher max allocation
     bounds = []
     for i, col in enumerate(assets):
         q = quality_dict[col]
@@ -966,7 +972,7 @@ def get_rebalance_dates(data: pd.DataFrame, frequency: RebalanceFrequency) -> Li
 
 def calculate_exit_rank(num_etfs: int, exit_rank_pct: float = 50.0) -> int:
     """
-    Calculate the exit rank based on the number of ETFs and the percentage buffer.
+    Calculate exit rank based on number of ETFs and percentage buffer.
     
     Formula: exit_rank = ceil(num_etfs * (1 + exit_rank_pct/100))
     
