@@ -2,7 +2,7 @@
 Quant ETFs Momentum Dashboard
 =============================
 
-Portfolio Optimization Methods (PyPortfolioOpt):
+Portfolio Optimization Methods (PyPortfolioOpt):-
 - Mean-Variance Optimization (MVO) - Maximize Sharpe
 - Tangency Portfolio (CAL) - Optimal Risky + Risk-Free allocation
 - Global Minimum Variance (GMVP) - Minimize volatility
@@ -21,7 +21,6 @@ Rebalance Frequencies:
 - Monthly - End of month
 - Quarterly - End of quarter
 
-Install: pip install streamlit yfinance pandas numpy plotly quantstats pypfopt scikit-learn
 """
 
 import streamlit as st
@@ -324,6 +323,11 @@ st.markdown("""
         border: 1px solid #2a3545;
         border-radius: 8px;
     }
+    
+    /* ========== PLOTLY CHART HOVER EFFECT ========== */
+    .js-plotly-plot .plotly .scatterlayer .trace path.js-line {
+        transition: stroke-width 0.15s ease, opacity 0.15s ease !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -402,13 +406,10 @@ def fetch_data(tickers: List[str], start: str, end: str) -> Tuple[pd.DataFrame, 
             
             logger.info(f"Fetched {len(successful)} assets, date range: {df.index.min()} to {df.index.max()}")
             
-            # CRITICAL: Don't drop any rows! Keep NaNs for dynamic backtest
-            # Only forward fill small gaps (weekends/holidays)
-            df = df.ffill(limit=5)
+           df = df.ffill(limit=5)
             
-            # Log limited history ETFs
             if limited_history:
-                logger.info(f"ETFs with limited history: {limited_history}")
+            logger.info(f"ETFs with limited history: {limited_history}")
             
             return df, failed
         return pd.DataFrame(), failed
@@ -417,7 +418,7 @@ def fetch_data(tickers: List[str], start: str, end: str) -> Tuple[pd.DataFrame, 
         return pd.DataFrame(), validated
 
 def fetch_benchmark(ticker: str, start: str, end: str) -> pd.Series:
-    """Fetch benchmark data. No caching to ensure fresh data."""
+    """Fetch benchmark data."""
     try:
         raw = yf.download(ticker, start=start, end=end, progress=False)
         return raw['Close'].dropna() if not raw.empty else pd.Series()
@@ -461,28 +462,26 @@ def optimize_upi(returns: pd.DataFrame, rf: float = 0.065) -> Dict[str, float]:
         vol = rets.std() * np.sqrt(252)
         ui = calculate_ulcer_index(rets)
         
-        # Individual UPI
+        # UPI
         asset_upi[col] = (ann_ret - rf) / ui if ui > 0 else 0
-        # Individual Sharpe
+        # Sharpe
         asset_sharpe[col] = (ann_ret - rf) / vol if vol > 0 else 0
     
-    # Create quality score (blend of UPI and Sharpe)
-    # Normalize scores
+    # Quality score
     upi_vals = np.array(list(asset_upi.values()))
     sharpe_vals = np.array(list(asset_sharpe.values()))
     
-    # Handle edge cases
     upi_min, upi_max = upi_vals.min(), upi_vals.max()
     sharpe_min, sharpe_max = sharpe_vals.min(), sharpe_vals.max()
     
     upi_norm = (upi_vals - upi_min) / (upi_max - upi_min + 1e-6)
     sharpe_norm = (sharpe_vals - sharpe_min) / (sharpe_max - sharpe_min + 1e-6)
     
-    # Combined quality score: 50% UPI + 50% Sharpe
+    # Combined Quality score
     quality_scores = 0.5 * upi_norm + 0.5 * sharpe_norm
     quality_dict = {assets[i]: quality_scores[i] for i in range(n_assets)}
     
-    # Stage 2: Optimize with quality-aware objective
+    # Optimize with quality-aware objective
     def quality_weighted_neg_upi(weights):
         port_returns = returns.dot(weights)
         port_upi = ulcer_performance_index(port_returns, rf)
@@ -494,7 +493,7 @@ def optimize_upi(returns: pd.DataFrame, rf: float = 0.065) -> Dict[str, float]:
         combined = 0.7 * port_upi + 0.3 * quality_alignment * 10  # Scale quality component
         return -combined
     
-    # Set bounds based on quality - high quality assets get higher max allocation
+    # High quality assets get higher max allocation
     bounds = []
     for i, col in enumerate(assets):
         q = quality_dict[col]
@@ -965,6 +964,89 @@ def get_rebalance_dates(data: pd.DataFrame, frequency: RebalanceFrequency) -> Li
     
     return [dates[0]]
 
+def calculate_exit_rank(num_etfs: int, exit_rank_pct: float = 50.0) -> int:
+    """
+    Calculate the exit rank based on the number of ETFs and the percentage buffer.
+    
+    Formula: exit_rank = ceil(num_etfs * (1 + exit_rank_pct/100))
+    
+    Examples with 50% buffer:
+    - 5 ETFs → 5 * 1.5 = 7.5 → 8
+    - 8 ETFs → 8 * 1.5 = 12
+    - 10 ETFs → 10 * 1.5 = 15
+    
+    Args:
+        num_etfs: Number of ETFs in current portfolio
+        exit_rank_pct: Percentage buffer (e.g., 50 means exit rank is 50% above num_etfs)
+    
+    Returns:
+        Exit rank threshold (integer)
+    """
+    import math
+    multiplier = 1 + (exit_rank_pct / 100.0)
+    exit_rank = math.ceil(num_etfs * multiplier)
+    return exit_rank
+
+def check_exit_rank_breach(
+    holdings: Dict[str, float],
+    scores: List[AssetScore],
+    exit_rank: int
+) -> Tuple[bool, Dict[str, int], List[str]]:
+    """
+    Check if any holding has breached the exit rank threshold.
+    
+    Args:
+        holdings: Current holdings {ticker: shares}
+        scores: List of AssetScore objects
+        exit_rank: Exit rank threshold
+    
+    Returns:
+        Tuple of:
+        - breach_detected: True if any holding rank > exit_rank
+        - holding_ranks: Dict of {ticker: current_rank}
+        - breached_tickers: List of tickers that breached
+    """
+    if not holdings or not scores:
+        return True, {}, []  # Force rebalance if no holdings
+    
+    # Create ranking from scores (1 = best)
+    scores_df = pd.DataFrame([vars(s) for s in scores])
+    
+    # Sort by composite score descending to get rankings
+    # First calculate composite if not present
+    for col in ['momentum_126d', 'sharpe_ratio']:
+        if col in scores_df.columns:
+            mn, mx = scores_df[col].min(), scores_df[col].max()
+            scores_df[f'{col}_n'] = (scores_df[col] - mn) / (mx - mn + 1e-6)
+    
+    # Use quality momentum composite
+    if 'momentum_126d_n' in scores_df.columns and 'sharpe_ratio_n' in scores_df.columns:
+        scores_df['composite'] = 0.5 * scores_df['momentum_126d_n'] + 0.5 * scores_df['sharpe_ratio_n']
+    else:
+        scores_df['composite'] = scores_df.get('momentum_126d', 0)
+    
+    scores_df = scores_df.sort_values('composite', ascending=False).reset_index(drop=True)
+    scores_df['rank'] = scores_df.index + 1  # Rank 1 = best
+    
+    # Get current holdings' ranks
+    holding_ranks = {}
+    breached_tickers = []
+    
+    for ticker in holdings.keys():
+        matching = scores_df[scores_df['ticker'] == ticker]
+        if len(matching) > 0:
+            rank = matching['rank'].iloc[0]
+            holding_ranks[ticker] = rank
+            if rank > exit_rank:
+                breached_tickers.append(ticker)
+        else:
+            # Ticker not in scores - consider it breached (delisted or no data)
+            holding_ranks[ticker] = 999
+            breached_tickers.append(ticker)
+    
+    breach_detected = len(breached_tickers) > 0
+    return breach_detected, holding_ranks, breached_tickers
+
 def run_backtest_with_rebalancing(
     weights_func,
     data: pd.DataFrame,
@@ -977,16 +1059,29 @@ def run_backtest_with_rebalancing(
     min_assets: int = 5,
     max_assets: int = 10,
     min_mom: float = 0.03,
-    risk_tolerance: float = 1.0
+    risk_tolerance: float = 1.0,
+    exit_rank_mode: str = "auto",  # "auto", "manual", or "disabled"
+    exit_rank_pct: float = 50.0,   # For auto mode: 50% means exit rank = 1.5x num_etfs
+    manual_exit_rank: int = 10    # For manual mode: specific exit rank
 ) -> Tuple[pd.DataFrame, pd.Series, List[Dict]]:
     """
-    Run backtest with periodic rebalancing.
-    Dynamically selects from whatever ETFs are available at each rebalance point.
+    Run backtest with periodic rebalancing and EXIT RANK logic.
+    
+    EXIT RANK MECHANISM:
+    - At each potential rebalance date, check current holdings' ranks
+    - If ANY holding's rank > exit_rank → REBALANCE (exit rank breached)
+    - If ALL holdings' ranks <= exit_rank → SKIP rebalance (no trigger)
+    
+    EXIT RANK CALCULATION:
+    - Auto mode: exit_rank = ceil(num_etfs * (1 + exit_rank_pct/100))
+      Example with 50%: 5 ETFs → 8, 8 ETFs → 12, 10 ETFs → 15
+    - Manual mode: Use specific exit_rank value
+    - Disabled: Always rebalance on schedule (old behavior)
     
     Returns:
         equity_df: Equity curve dataframe
         port_rets: Portfolio returns series
-        rebalance_log: List of rebalancing events
+        rebalance_log: List of rebalancing events (with exit rank details)
     """
     try:
         if data.empty:
@@ -1001,10 +1096,12 @@ def run_backtest_with_rebalancing(
         holdings = {}  # ticker -> shares
         cash = initial
         current_weights = {}
+        current_exit_rank = manual_exit_rank  # Will be updated in auto mode
         
         equity_curve = []
         port_returns = []
         rebalance_log = []
+        skipped_rebalances = []  # Track skipped rebalances for logging
         
         prev_value = initial
         first_rebalance_done = False
@@ -1048,45 +1145,99 @@ def run_backtest_with_rebalancing(
                     scores = calculate_scores(hist_data_filtered, hist_bench, min_mom, rf)
                     
                     if scores and len(scores) >= min_assets:
-                        # Select assets based on model (from available assets only)
-                        selected = select_assets(scores, selection_model, min_assets, max_assets, min_mom)
+                        # ========== EXIT RANK CHECK ==========
+                        should_rebalance = True
+                        breach_detected = False
+                        holding_ranks = {}
+                        breached_tickers = []
                         
-                        if len(selected) >= 2:
-                            # Optimize with selected assets
-                            weights, perf, _, _, _, extra = optimize_portfolio(
-                                hist_data_filtered, rf, opt_method, selected, risk_tolerance
+                        if first_rebalance_done and exit_rank_mode != "disabled":
+                            # Calculate current exit rank based on portfolio size
+                            num_etfs_in_portfolio = len([h for h in holdings.keys() if holdings[h] > 0])
+                            
+                            if exit_rank_mode == "auto":
+                                current_exit_rank = calculate_exit_rank(num_etfs_in_portfolio, exit_rank_pct)
+                            else:  # manual mode
+                                current_exit_rank = manual_exit_rank
+                            
+                            # Cap exit rank at number of available assets
+                            current_exit_rank = min(current_exit_rank, len(available_assets))
+                            
+                            # Check if any holding has breached exit rank
+                            breach_detected, holding_ranks, breached_tickers = check_exit_rank_breach(
+                                holdings, scores, current_exit_rank
                             )
                             
-                            if weights:
-                                # Calculate current portfolio value
-                                current_prices = data.loc[date]
-                                if holdings:
-                                    portfolio_value = sum(
-                                        holdings.get(t, 0) * current_prices.get(t, 0) 
-                                        for t in holdings if t in current_prices.index and pd.notna(current_prices.get(t, 0))
-                                    ) + cash
+                            should_rebalance = breach_detected
+                            
+                            if not should_rebalance:
+                                # Log skipped rebalance
+                                skipped_rebalances.append({
+                                    'date': date,
+                                    'reason': 'Exit rank not breached',
+                                    'exit_rank': current_exit_rank,
+                                    'holding_ranks': holding_ranks.copy(),
+                                    'num_holdings': num_etfs_in_portfolio
+                                })
+                                logger.info(f"SKIP rebalance {date}: Exit rank {current_exit_rank} not breached. Holdings ranks: {holding_ranks}")
+                        
+                        # ========== REBALANCE IF TRIGGERED ==========
+                        if should_rebalance:
+                            # Select assets based on model (from available assets only)
+                            selected = select_assets(scores, selection_model, min_assets, max_assets, min_mom)
+                            
+                            if len(selected) >= 2:
+                                # Optimize with selected assets
+                                weights, perf, _, _, _, extra = optimize_portfolio(
+                                    hist_data_filtered, rf, opt_method, selected, risk_tolerance
+                                )
                                 
-                                # Rebalance to new weights
-                                new_holdings = {}
-                                for ticker, weight in weights.items():
-                                    if weight > 0.001 and ticker in current_prices.index:
-                                        price = current_prices[ticker]
-                                        if pd.notna(price) and price > 0:
-                                            new_holdings[ticker] = (portfolio_value * weight) / price
-                                
-                                if new_holdings:
-                                    holdings = new_holdings
-                                    current_weights = weights.copy()
-                                    cash = 0  # Fully invested
-                                    first_rebalance_done = True
+                                if weights:
+                                    # Calculate current portfolio value
+                                    current_prices = data.loc[date]
+                                    if holdings:
+                                        portfolio_value = sum(
+                                            holdings.get(t, 0) * current_prices.get(t, 0) 
+                                            for t in holdings if t in current_prices.index and pd.notna(current_prices.get(t, 0))
+                                        ) + cash
                                     
-                                    rebalance_log.append({
-                                        'date': date,
-                                        'weights': weights.copy(),
-                                        'selected': selected.copy(),
-                                        'available': len(available_assets),
-                                        'perf': perf
-                                    })
+                                    # Rebalance to new weights
+                                    new_holdings = {}
+                                    for ticker, weight in weights.items():
+                                        if weight > 0.001 and ticker in current_prices.index:
+                                            price = current_prices[ticker]
+                                            if pd.notna(price) and price > 0:
+                                                new_holdings[ticker] = (portfolio_value * weight) / price
+                                    
+                                    if new_holdings:
+                                        old_holdings = list(holdings.keys()) if holdings else []
+                                        holdings = new_holdings
+                                        current_weights = weights.copy()
+                                        cash = 0  # Fully invested
+                                        
+                                        # Update exit rank for new portfolio size
+                                        num_new_etfs = len([h for h in new_holdings.keys() if new_holdings[h] > 0])
+                                        if exit_rank_mode == "auto":
+                                            current_exit_rank = calculate_exit_rank(num_new_etfs, exit_rank_pct)
+                                        
+                                        first_rebalance_done = True
+                                        
+                                        # Log rebalance with exit rank details
+                                        rebalance_log.append({
+                                            'date': date,
+                                            'weights': weights.copy(),
+                                            'selected': selected.copy(),
+                                            'available': len(available_assets),
+                                            'perf': perf,
+                                            'exit_rank_mode': exit_rank_mode,
+                                            'exit_rank': current_exit_rank,
+                                            'breach_detected': breach_detected,
+                                            'breached_tickers': breached_tickers.copy() if breached_tickers else [],
+                                            'holding_ranks_before': holding_ranks.copy() if holding_ranks else {},
+                                            'trigger_reason': 'Exit rank breached' if breach_detected else 'Initial rebalance'
+                                        })
+                                        
+                                        logger.info(f"REBALANCE {date}: Exit rank {current_exit_rank}, Breached: {breached_tickers}, New: {len(selected)} ETFs")
             
             # Calculate daily portfolio value
             current_prices = data.loc[date]
@@ -1148,7 +1299,12 @@ def run_backtest_with_rebalancing(
         
         port_rets = pd.Series(port_returns, index=data.index)
         
-        logger.info(f"Backtest complete: {len(rebalance_log)} rebalances logged")
+        logger.info(f"Backtest complete: {len(rebalance_log)} rebalances, {len(skipped_rebalances)} skipped (exit rank not breached)")
+        
+        # Add skipped rebalances info to the last log entry for UI display
+        if rebalance_log and skipped_rebalances:
+            rebalance_log[-1]['total_skipped'] = len(skipped_rebalances)
+            rebalance_log[-1]['skipped_details'] = skipped_rebalances
         
         return eq_df, port_rets, rebalance_log
         
@@ -1196,65 +1352,276 @@ def run_backtest(weights: Dict, data: pd.DataFrame, benchmark: pd.Series, initia
 
 # --- CHARTS ---
 def create_equity_chart(eq: pd.DataFrame) -> go.Figure:
+    """
+    Create equity chart with BOLD HIGHLIGHT on hover.
+    Uses Plotly's native hoveron and hoverinfo for highlighting effect.
+    """
     fig = go.Figure()
-    colors = {'Portfolio': '#00ff88', 'Benchmark': '#ff6b6b'}
-    asset_colors = px.colors.qualitative.Set2
+    
+    # Neon color palette
+    neon_colors = {
+        'Portfolio': '#00ff88',      # Neon Green
+        'Benchmark': '#ff6b6b',      # Neon Red/Coral
+    }
+    
+    # Extended neon palette for individual assets
+    asset_neon_colors = [
+        '#00bfff',  # Cyan Blue
+        '#ff00ff',  # Magenta  
+        '#ffff00',  # Yellow
+        '#ff8c00',  # Orange
+        '#00ffff',  # Cyan
+        '#ff1493',  # Pink
+        '#7fff00',  # Chartreuse
+        '#9400d3',  # Purple
+        '#00fa9a',  # Spring Green
+        '#ff4500',  # Orange Red
+        '#1e90ff',  # Dodger Blue
+        '#ffd700',  # Gold
+        '#adff2f',  # Green Yellow
+        '#da70d6',  # Orchid
+        '#87ceeb',  # Sky Blue
+    ]
     
     for i, col in enumerate(eq.columns):
         if col == 'Portfolio':
-            c, w, d = colors['Portfolio'], 3, 'solid'
+            color = neon_colors['Portfolio']
+            width = 2
+            dash = 'solid'
         elif col == 'Benchmark':
-            c, w, d = colors['Benchmark'], 2, 'dash'
+            color = neon_colors['Benchmark']
+            width = 1
+            dash = 'dash'
         else:
-            c, w, d = asset_colors[i % len(asset_colors)], 1.5, 'solid'
+            color = asset_neon_colors[i % len(asset_neon_colors)]
+            width = 1
+            dash = 'solid'
         
         fig.add_trace(go.Scatter(
-            x=eq.index, y=eq[col], mode='lines', name=col,
-            line=dict(color=c, width=w, dash=d),
-            hovertemplate=f'<b>{col}</b><br>%{{x|%Y-%m-%d}}<br>Value: %{{y:.2f}}<extra></extra>'
+            x=eq.index, 
+            y=eq[col], 
+            mode='lines', 
+            name=col,
+            line=dict(color=color, width=width, dash=dash),
+            hoverinfo='text+name',
+            hovertext=[f"{col}<br>{eq.index[j].strftime('%Y-%m-%d')}<br>Equity: {eq[col].iloc[j]:.1f}%" for j in range(len(eq))],
+            hoverlabel=dict(
+                bgcolor='rgba(20,25,35,0.95)',
+                bordercolor=color,
+                font=dict(size=13, color='white', family='SF Mono, Consolas, monospace')
+            ),
+            # Key for highlighting - set selected/unselected states
+            selected=dict(marker=dict(opacity=1)),
+            unselected=dict(marker=dict(opacity=0.1))
         ))
     
+    # Update layout with hover mode that enables trace highlighting
     fig.update_layout(
-        template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(20,25,35,0.8)',
-        title="Portfolio vs Benchmark vs Assets (Base = 100)",
-        xaxis=dict(title="Date", gridcolor='rgba(50,60,80,0.5)'),
-        yaxis=dict(title="Value", gridcolor='rgba(50,60,80,0.5)'),
-        hovermode='closest',  # Only show hovered curve
-        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
-        margin=dict(r=150)
-    )
-    
-    # Highlight hovered trace - others fade to 20% opacity
-    fig.update_traces(
-        opacity=0.85,
-        hoverlabel=dict(
-            bgcolor="rgba(30,35,45,0.95)",
-            font_size=13,
-            font_family="Arial",
-            bordercolor="white"
-        )
-    )
-    
-    # This makes non-hovered traces fade when hovering on one
-    fig.update_layout(
-        hoverlabel=dict(namelength=-1),  # Show full name
+        template="plotly_dark",
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(10,15,25,0.95)',
+        title=dict(
+            text="Price Performance (Indexed to 100)",
+            font=dict(size=18, color='#e0e0e0', family='Arial'),
+            x=0.5,
+            xanchor='center'
+        ),
+        xaxis=dict(
+            title="Date",
+            gridcolor='rgba(50,60,80,0.3)',
+            showgrid=True,
+            zeroline=False,
+            tickfont=dict(color='#888')
+        ),
+        yaxis=dict(
+            title="Equity (%, Log scale)",
+            gridcolor='rgba(50,60,80,0.3)',
+            showgrid=True,
+            zeroline=False,
+            tickfont=dict(color='#888'),
+            type='log'
+        ),
+        hovermode='closest',
+        hoverdistance=20,  # Increase hover detection distance
         legend=dict(
-            itemclick="toggle",
-            itemdoubleclick="toggleothers"
-        )
+            orientation="h",
+            yanchor="top",
+            y=-0.12,
+            xanchor="center",
+            x=0.5,
+            bgcolor='rgba(0,0,0,0)',
+            font=dict(size=10, color='#aaa'),
+            itemsizing='constant'
+        ),
+        margin=dict(r=50, t=80, b=100, l=70),
     )
     
-    # JavaScript for highlight effect on hover
-    fig.update_traces(
-        hoverinfo='all',
-        selector=dict(type='scatter')
+    # Add baseline at 100
+    fig.add_hline(
+        y=100, 
+        line_dash="dot", 
+        line_color="rgba(255,255,255,0.2)",
+        line_width=1
     )
     
-    fig.add_hline(y=100, line_dash="dot", line_color="rgba(255,255,255,0.3)")
     return fig
 
+
+def create_equity_chart_with_highlight(eq: pd.DataFrame) -> str:
+    """
+    Create equity chart with TRUE hover highlighting using Plotly.js directly.
+    Returns HTML string that can be rendered with st.components.v1.html()
+    """
+    
+    # Neon color palette
+    neon_colors = {
+        'Portfolio': '#00ff88',
+        'Benchmark': '#ff6b6b',
+    }
+    
+    asset_neon_colors = [
+        '#00bfff', '#ff00ff', '#ffff00', '#ff8c00', '#00ffff',
+        '#ff1493', '#7fff00', '#9400d3', '#00fa9a', '#ff4500',
+        '#1e90ff', '#ffd700', '#adff2f', '#da70d6', '#87ceeb'
+    ]
+    
+    # Build traces data for JavaScript
+    traces_js = []
+    for i, col in enumerate(eq.columns):
+        if col == 'Portfolio':
+            color = neon_colors['Portfolio']
+            width = 2
+            dash = 'solid'
+        elif col == 'Benchmark':
+            color = neon_colors['Benchmark']
+            width = 1
+            dash = 'dash'
+        else:
+            color = asset_neon_colors[i % len(asset_neon_colors)]
+            width = 1
+            dash = 'solid'
+        
+        x_vals = [d.strftime('%Y-%m-%d') for d in eq.index]
+        y_vals = eq[col].tolist()
+        
+        trace = {
+            'x': x_vals,
+            'y': y_vals,
+            'mode': 'lines',
+            'name': col,
+            'line': {'color': color, 'width': width, 'dash': dash},
+            'hovertemplate': f'<b>{col}</b><br>%{{x}}<br>Equity: %{{y:.1f}}%<extra></extra>',
+            'hoverlabel': {
+                'bgcolor': 'rgba(20,25,35,0.95)',
+                'bordercolor': color,
+                'font': {'size': 13, 'color': 'white', 'family': 'SF Mono, Consolas, monospace'}
+            }
+        }
+        traces_js.append(trace)
+    
+    import json
+    traces_json = json.dumps(traces_js)
+    
+    html = f'''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+        <style>
+            body {{ margin: 0; padding: 0; background: transparent; }}
+            #chart {{ width: 100%; height: 500px; }}
+        </style>
+    </head>
+    <body>
+        <div id="chart"></div>
+        <script>
+            var traces = {traces_json};
+            var originalWidths = traces.map(t => t.line.width);
+            
+            var layout = {{
+                template: 'plotly_dark',
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(10,15,25,0.95)',
+                title: {{
+                    text: 'Price Performance (Indexed to 100)',
+                    font: {{size: 18, color: '#e0e0e0'}},
+                    x: 0.5
+                }},
+                xaxis: {{
+                    title: 'Date',
+                    gridcolor: 'rgba(50,60,80,0.3)',
+                    tickfont: {{color: '#888'}}
+                }},
+                yaxis: {{
+                    title: 'Equity (%, Log scale)',
+                    gridcolor: 'rgba(50,60,80,0.3)',
+                    tickfont: {{color: '#888'}},
+                    type: 'log'
+                }},
+                hovermode: 'closest',
+                legend: {{
+                    orientation: 'h',
+                    y: -0.15,
+                    x: 0.5,
+                    xanchor: 'center',
+                    font: {{size: 10, color: '#aaa'}}
+                }},
+                margin: {{r: 50, t: 60, b: 80, l: 70}},
+                shapes: [{{
+                    type: 'line',
+                    x0: 0, x1: 1, xref: 'paper',
+                    y0: 100, y1: 100,
+                    line: {{color: 'rgba(255,255,255,0.2)', width: 1, dash: 'dot'}}
+                }}]
+            }};
+            
+            Plotly.newPlot('chart', traces, layout, {{responsive: true}});
+            
+            var chart = document.getElementById('chart');
+            
+            // Hover highlight effect
+            chart.on('plotly_hover', function(data) {{
+                var hoveredTrace = data.points[0].curveNumber;
+                var update = {{}};
+                
+                var widths = [];
+                var opacities = [];
+                
+                for (var i = 0; i < traces.length; i++) {{
+                    if (i === hoveredTrace) {{
+                        widths.push(originalWidths[i] * 2.5);  // Bold
+                        opacities.push(1);
+                    }} else {{
+                        widths.push(originalWidths[i] * 0.7);  // Slightly thinner
+                        opacities.push(0.5);  // 50% opacity - still visible for comparison
+                    }}
+                }}
+                
+                Plotly.restyle(chart, {{
+                    'line.width': widths,
+                    'opacity': opacities
+                }});
+            }});
+            
+            // Restore on unhover
+            chart.on('plotly_unhover', function() {{
+                var widths = originalWidths.slice();
+                var opacities = traces.map(() => 0.85);
+                
+                Plotly.restyle(chart, {{
+                    'line.width': widths,
+                    'opacity': opacities
+                }});
+            }});
+        </script>
+    </body>
+    </html>
+    '''
+    
+    return html
+
 def create_monthly_heatmap(rets: pd.Series) -> go.Figure:
-    """Create monthly returns heatmap with 2 decimal percentages and integer years."""
+    """Create monthly returns heatmap with NEON colors, bold text, Total and Max DD columns."""
     try:
         if rets.empty or len(rets) < 20:
             return go.Figure()
@@ -1271,58 +1638,139 @@ def create_monthly_heatmap(rets: pd.Series) -> go.Figure:
         if len(years) == 0:
             return go.Figure()
         
-        # Create a complete grid with all months for all years
-        month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        # Create column names: 12 months + Total + Max DD
+        column_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Total', 'Max DD']
         
-        # Build the data matrix manually to ensure all months are present
+        # Build the data matrix with Total and Max DD
         data_matrix = []
         for year in years:
             row = []
+            year_returns = []
+            
+            # Get monthly returns for this year
             for month in range(1, 13):
-                # Find the return for this year-month
                 matching = monthly[(monthly.index.year == year) & (monthly.index.month == month)]
                 if len(matching) > 0:
-                    row.append(matching.iloc[0] * 100)  # Convert to percentage
+                    val = matching.iloc[0] * 100  # Convert to percentage
+                    row.append(val)
+                    year_returns.append(matching.iloc[0])
                 else:
                     row.append(np.nan)
+            
+            # Calculate Total (yearly return) - compound the monthly returns
+            if year_returns:
+                total_return = ((1 + pd.Series(year_returns)).prod() - 1) * 100
+            else:
+                total_return = np.nan
+            row.append(total_return)
+            
+            # Calculate Max Drawdown for this year
+            year_data = rets[rets.index.year == year]
+            if len(year_data) > 0:
+                cum_returns = (1 + year_data).cumprod()
+                rolling_max = cum_returns.cummax()
+                drawdowns = (cum_returns - rolling_max) / rolling_max
+                max_dd = drawdowns.min() * 100  # Convert to percentage (will be negative)
+            else:
+                max_dd = np.nan
+            row.append(max_dd)
+            
             data_matrix.append(row)
         
         # Convert to numpy array
         z_values = np.array(data_matrix)
         
-        # Create text annotations
-        text_values = [[f'{v:.2f}%' if pd.notna(v) else '' for v in row] for row in z_values]
+        # Create text annotations with bold formatting
+        text_values = []
+        for row in z_values:
+            text_row = []
+            for i, v in enumerate(row):
+                if pd.notna(v):
+                    if i == 13:  # Max DD column - always negative
+                        text_row.append(f'<b>{v:.2f}%</b>')
+                    else:
+                        text_row.append(f'<b>{v:.2f}%</b>')
+                else:
+                    text_row.append('')
+            text_values.append(text_row)
+        
+        # NEON Color Scale: Magenta (negative) -> Dark -> Cyan/Green (positive)
+        neon_colorscale = [
+            [0.0, '#ff0066'],      # Neon Magenta/Pink (very negative)
+            [0.15, '#ff2244'],     # Neon Red
+            [0.3, '#ff6600'],      # Neon Orange
+            [0.45, '#1a1a2e'],     # Dark (near zero negative)
+            [0.5, '#0d1117'],      # Dark center (zero)
+            [0.55, '#1a2a1a'],     # Dark (near zero positive)
+            [0.7, '#00cc44'],      # Neon Green
+            [0.85, '#00ff88'],     # Bright Neon Green
+            [1.0, '#00ffff'],      # Neon Cyan (very positive)
+        ]
         
         fig = go.Figure(go.Heatmap(
             z=z_values, 
-            x=month_names, 
+            x=column_names, 
             y=years,
-            colorscale='RdYlGn', 
+            colorscale=neon_colorscale, 
             zmid=0,
             text=text_values,
             texttemplate='%{text}', 
-            textfont={"size":10, "color":"black"},
+            textfont=dict(
+                size=12, 
+                color='white',
+                family='SF Mono, Consolas, monospace'
+            ),
             hoverongaps=False,
-            showscale=True
+            showscale=True,
+            colorbar=dict(
+                title=dict(text='Return %', font=dict(color='#00ff88', size=12)),
+                tickfont=dict(color='#aaa', size=10),
+                tickformat='.1f',
+                outlinecolor='#333',
+                outlinewidth=1,
+                bgcolor='rgba(20,25,35,0.8)'
+            ),
+            hovertemplate='<b>%{y} %{x}</b><br>Value: %{z:.2f}%<extra></extra>'
         ))
         
         fig.update_layout(
             template="plotly_dark", 
             paper_bgcolor='rgba(0,0,0,0)',
-            title=f"Monthly Returns (%) - {years[0]} to {years[-1]}", 
-            height=max(250, 60 * len(years)),
+            plot_bgcolor='rgba(10,15,25,0.95)',
+            title=dict(
+                text=f"Monthly Returns (%) - {years[0]} to {years[-1]}",
+                font=dict(size=16, color='#00ff88'),
+                x=0.5,
+                xanchor='center'
+            ),
+            height=max(300, 70 * len(years)),
             yaxis=dict(
                 tickmode='array',
                 tickvals=years,
-                ticktext=[str(y) for y in years],
-                autorange='reversed'  # Latest year at top
+                ticktext=[f'<b>{y}</b>' for y in years],
+                tickfont=dict(color='#00ffff', size=13, family='SF Mono'),
+                autorange='reversed',  # Latest year at top
+                gridcolor='rgba(50,60,80,0.3)'
             ),
             xaxis=dict(
                 side='top',
-                tickangle=0
+                tickangle=0,
+                tickfont=dict(color='#a855f7', size=11, family='SF Mono'),
+                gridcolor='rgba(50,60,80,0.3)'
             ),
-            margin=dict(t=80, b=20)
+            margin=dict(t=100, b=30, l=60, r=120)
         )
+        
+        # Add cell borders for better visibility
+        fig.update_traces(
+            xgap=2,  # Gap between cells
+            ygap=2
+        )
+        
+        # Add vertical lines to separate Total and Max DD columns
+        fig.add_vline(x=11.5, line_width=2, line_color='rgba(168,85,247,0.5)')  # Before Total
+        fig.add_vline(x=12.5, line_width=2, line_color='rgba(168,85,247,0.5)')  # Before Max DD
+        
         return fig
     except Exception as e:
         logger.error(f"Monthly heatmap error: {e}")
@@ -1610,6 +2058,49 @@ with st.sidebar:
     rebal_freq = st.selectbox("Frequency", [f.value for f in RebalanceFrequency], index=2)
     rebal_freq_enum = RebalanceFrequency(rebal_freq)
     
+    # Exit Rank Controls (only show if not Buy & Hold)
+    exit_rank_mode = "disabled"
+    exit_rank_pct = 50.0
+    manual_exit_rank = 10
+    
+    if rebal_freq_enum != RebalanceFrequency.BUY_HOLD:
+        st.markdown("### 🚪 Exit Rank Trigger")
+        st.caption("Rebalance only when holdings breach exit rank threshold")
+        
+        exit_rank_mode = st.radio(
+            "Exit Rank Mode",
+            ["auto", "manual", "disabled"],
+            index=0,
+            horizontal=True,
+            help="""
+            **Auto**: Exit rank = ETFs × (1 + Buffer%). E.g., 5 ETFs with 50% buffer → Exit rank 8
+            **Manual**: Set specific exit rank (1-55)
+            **Disabled**: Always rebalance on schedule (old behavior)
+            """
+        )
+        
+        if exit_rank_mode == "auto":
+            exit_rank_pct = st.slider(
+                "Buffer %", 
+                min_value=25, max_value=100, value=50, step=5,
+                help="Exit rank = ETFs × (1 + Buffer/100). 50% means 1.5× multiplier"
+            )
+            # Show example calculation
+            example_etfs = 5
+            example_exit = int(np.ceil(example_etfs * (1 + exit_rank_pct/100)))
+            st.caption(f"📊 Example: {example_etfs} ETFs → Exit Rank **{example_exit}** | 8 ETFs → **{int(np.ceil(8 * (1 + exit_rank_pct/100)))}** | 10 ETFs → **{int(np.ceil(10 * (1 + exit_rank_pct/100)))}**")
+            
+        elif exit_rank_mode == "manual":
+            manual_exit_rank = st.number_input(
+                "Exit Rank", 
+                min_value=1, max_value=55, value=10,
+                help="Fixed exit rank threshold. Holdings ranked > this will trigger rebalance."
+            )
+            st.caption(f"📊 If any holding falls to rank **>{manual_exit_rank}**, rebalance is triggered")
+        
+        else:  # disabled
+            st.info("⚡ **Disabled**: Rebalancing will occur on every scheduled date regardless of holdings' ranks")
+    
     st.markdown("### 📊 Parameters")
     rf_rate = st.number_input("Risk-Free Rate", value=0.065, step=0.005, format="%.3f")
     
@@ -1880,6 +2371,14 @@ if tickers:
             
             st.markdown(f"**Rebalance Frequency:** {rebal_freq}")
             
+            # Show exit rank settings if enabled
+            if rebal_freq_enum != RebalanceFrequency.BUY_HOLD and exit_rank_mode != "disabled":
+                if exit_rank_mode == "auto":
+                    example_exit = int(np.ceil(bt_min_assets * (1 + exit_rank_pct/100)))
+                    st.markdown(f"**🚪 Exit Rank:** Auto ({exit_rank_pct:.0f}% buffer) → ~{example_exit} for {bt_min_assets} ETFs")
+                else:
+                    st.markdown(f"**🚪 Exit Rank:** Manual → Threshold: {manual_exit_rank}")
+            
             # Show data diagnostics
             data_start = data.index[0].strftime('%Y-%m-%d')
             data_end = data.index[-1].strftime('%Y-%m-%d')
@@ -1920,7 +2419,10 @@ if tickers:
                             min_assets=bt_min_assets,
                             max_assets=bt_max_assets,
                             min_mom=bt_min_mom,
-                            risk_tolerance=bt_risk_tol
+                            risk_tolerance=bt_risk_tol,
+                            exit_rank_mode=exit_rank_mode,
+                            exit_rank_pct=exit_rank_pct,
+                            manual_exit_rank=manual_exit_rank
                         )
             
                 if not equity.empty and len(port_rets) >= 20:
@@ -1939,11 +2441,39 @@ if tickers:
                         first_available = rebalance_log[0].get('available', '?')
                         last_available = rebalance_log[-1].get('available', '?')
                         
-                        st.success(f"""
+                        # Get exit rank info
+                        total_skipped = rebalance_log[-1].get('total_skipped', 0)
+                        exit_rank_used = rebalance_log[-1].get('exit_rank', 'N/A')
+                        exit_mode_used = rebalance_log[-1].get('exit_rank_mode', 'disabled')
+                        
+                        # Build summary message
+                        summary_msg = f"""
                         ✅ **Backtest Complete:** {port_start} → {port_end} ({len(port_rets)} days)  
                         📊 **{len(rebalance_log)} Rebalances** | First: {first_str} | Last: {last_str}  
                         🌐 **Dynamic Universe:** {first_available} ETFs available at start → {last_available} at end
-                        """)
+                        """
+                        
+                        if exit_mode_used != "disabled":
+                            summary_msg += f"""
+                        🚪 **Exit Rank Mode:** {exit_mode_used.upper()} | Threshold: {exit_rank_used} | Skipped: {total_skipped} rebalances
+                            """
+                        
+                        st.success(summary_msg)
+                        
+                        # Show exit rank details if enabled
+                        if exit_mode_used != "disabled" and total_skipped > 0:
+                            with st.expander(f"🚪 Exit Rank Details ({total_skipped} rebalances skipped)"):
+                                skipped_details = rebalance_log[-1].get('skipped_details', [])
+                                if skipped_details:
+                                    skip_df = pd.DataFrame([{
+                                        'Date': s['date'].strftime('%Y-%m-%d') if hasattr(s['date'], 'strftime') else str(s['date']),
+                                        'Exit Rank': s['exit_rank'],
+                                        'Holdings': s['num_holdings'],
+                                        'Max Rank': max(s['holding_ranks'].values()) if s['holding_ranks'] else 'N/A',
+                                        'Reason': s['reason']
+                                    } for s in skipped_details[-20:]])  # Show last 20
+                                    st.dataframe(skip_df, use_container_width=True, hide_index=True)
+                                    st.caption("Showing last 20 skipped rebalances. Holdings stayed within exit rank threshold.")
                         
                         # Warn if first rebalance is much later than data start
                         data_start = data.index[0]
@@ -1956,7 +2486,10 @@ if tickers:
                     t1, t2, t3, t4, t5 = st.tabs(["📈 Equity", "📉 Drawdown", "📊 Metrics", "📅 Monthly", "🔄 Rebalances"])
                     
                     with t1:
-                        st.plotly_chart(create_equity_chart(equity), use_container_width=True)
+                        # Use HTML component for true hover highlighting
+                        import streamlit.components.v1 as components
+                        chart_html = create_equity_chart_with_highlight(equity)
+                        components.html(chart_html, height=550, scrolling=False)
                     
                     with t2:
                         cum = (1 + port_rets).cumprod()
@@ -2000,6 +2533,8 @@ if tickers:
                                     'Date': date_str,
                                     'Available': log.get('available', log.get('available_assets', '-')),
                                     'Selected': len(log.get('selected', [])),
+                                    'Exit Rank': log.get('exit_rank', '-'),
+                                    'Trigger': log.get('trigger_reason', 'Scheduled')[:20],
                                     'Top Holdings': ', '.join(top_assets) if top_assets else '-'
                                 })
                             
@@ -2010,14 +2545,32 @@ if tickers:
                                 height=min(400, 35 * len(rebal_summary) + 40)
                             )
                             
-                            st.caption("📊 **Available** = ETFs with sufficient data at that date | **Selected** = ETFs chosen by model")
+                            st.caption("📊 **Available** = ETFs with data | **Selected** = ETFs chosen | **Exit Rank** = Threshold | **Trigger** = Why rebalanced")
                             
                             # Show last 5 in detail
                             st.markdown("##### Last 5 Rebalances (Details)")
                             for i, log in enumerate(rebalance_log[-5:]):
-                                with st.expander(f"📅 {log['date'].strftime('%Y-%m-%d') if hasattr(log['date'], 'strftime') else log['date']} | Available: {log.get('available', '?')} → Selected: {len(log.get('selected', []))}"):
+                                date_label = log['date'].strftime('%Y-%m-%d') if hasattr(log['date'], 'strftime') else log['date']
+                                exit_info = f" | Exit Rank: {log.get('exit_rank', 'N/A')}" if log.get('exit_rank') else ""
+                                trigger_info = f" | {log.get('trigger_reason', '')}" if log.get('trigger_reason') else ""
+                                
+                                with st.expander(f"📅 {date_label} | Available: {log.get('available', '?')} → Selected: {len(log.get('selected', []))}{exit_info}{trigger_info}"):
                                     st.markdown(f"**Available ETFs:** {log.get('available', '?')}")
                                     st.markdown(f"**Selected Assets:** {len(log.get('selected', []))}")
+                                    
+                                    # Show exit rank info if present
+                                    if log.get('exit_rank_mode') and log.get('exit_rank_mode') != 'disabled':
+                                        st.markdown(f"**Exit Rank Mode:** {log.get('exit_rank_mode', 'N/A').upper()}")
+                                        st.markdown(f"**Exit Rank Threshold:** {log.get('exit_rank', 'N/A')}")
+                                        
+                                        if log.get('breached_tickers'):
+                                            breached = [clean_ticker(t) for t in log['breached_tickers']]
+                                            st.warning(f"🚪 **Breached Tickers:** {', '.join(breached)}")
+                                        
+                                        if log.get('holding_ranks_before'):
+                                            ranks_str = ', '.join([f"{clean_ticker(k)}: #{v}" for k, v in log['holding_ranks_before'].items()])
+                                            st.caption(f"📊 Holdings ranks before: {ranks_str}")
+                                    
                                     if log.get('weights'):
                                         wdf = pd.DataFrame([
                                             {'Asset': clean_ticker(k), 'Weight': f"{v:.1%}"}
