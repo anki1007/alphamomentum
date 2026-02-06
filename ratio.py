@@ -278,7 +278,7 @@ def fetch_all_prices():
     # Get today's date for fetching latest data
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
     try:
-        df = yf.download(tickers, start="2000-01-01", end=end_date, group_by='ticker', progress=False, auto_adjust=True, threads=True)
+        df = yf.download(tickers, start="2018-01-01", end=end_date, group_by='ticker', progress=False, auto_adjust=True, threads=True)
     except Exception as e:
         st.error(f"Critical Download Error: {e}")
         return {}
@@ -1197,3 +1197,4 @@ with tab5:
 
 # FOOTER LINE (FIXED)
 st.markdown("""<div style="text-align: center; padding: 20px; color: #888; font-size: 14px;">Made with ❤️ by <b>Stallions</b> | ©2026 Stallions - All Rights Reserved</div>""", unsafe_allow_html=True)
+
