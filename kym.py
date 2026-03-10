@@ -79,7 +79,7 @@ PERIOD_DAYS_MAP: Dict[str, int] = {
     "30 Days":   30,
     "63 Days":   63,
     "90 Days":   90,
-    "123 Days":  123,
+    "126 Days":  126,
     "252 Days":  252,
     "2 Year":    504,
     "3 Year":    756,
