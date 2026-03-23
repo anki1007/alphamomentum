@@ -21,7 +21,7 @@ st.set_page_config(
 st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
 
-/* ── Base ── */
+/* ── Base ─ */
 html, body, [data-testid="stApp"], .stApp  {
     background: #010f14 !important;
     background-image:
@@ -138,12 +138,12 @@ hr { border-color: #00ffff25 !important; margin: 1rem 0 !important; }
 }
 .stSlider [data-baseweb="slider"] { padding: 0.5rem 0; }
 
-/* ── Progress ── */
+/* ── Progress ─ */
 [data-testid="stProgressBar"] > div > div > div {
     background: linear-gradient(90deg, #00ffff, #39ff14) !important;
 }
 
-/* ── Alerts ── */
+/* ── Alerts ─ */
 [data-testid="stSuccess"] { background: #0a2a14 !important; border-left: 4px solid #39ff14 !important; color: #39ff14 !important; }
 [data-testid="stWarning"] { background: #2a1a00 !important; border-left: 4px solid #ffaa00 !important; }
 [data-testid="stError"] { background: #2a0a0a !important; border-left: 4px solid #ff4444 !important; }
@@ -160,11 +160,11 @@ hr { border-color: #00ffff25 !important; margin: 1rem 0 !important; }
 /* ── Spinner ── */
 [data-testid="stSpinner"] p { color: #00ffff !important; }
  
-/* ── Checkbox ── */
+/* ── Checkbox ─ */
 .stCheckbox > label { color: #a0d8df !important; }
 """, unsafe_allow_html=True)
 
-# ── CONSTANTS ────────────────────────────────────────────────────────────────
+# ── CONSTANTS ───────────────────────────────────────────────────────────────
 NIFTY_URL = "https://www.niftyindices.com/IndexConstituent/ind_niftytotalmarket_list.csv"
 CACHE_TTL = 3600
 
@@ -214,6 +214,7 @@ def get_support_levels(df: pd.DataFrame, threshold_pct: float) -> tuple:
     """Returns (is_near_support, nearest_level, yearly_low, yearly_high, monthly_ohlc_df, yearly_closes)"""
     if df.empty:
         return False, None, None, None, pd.DataFrame(), {}
+    
     hist = df[df.index.year.isin([2020, 2021, 2022])].copy()
     if hist.empty:
         return False, None, None, None, pd.DataFrame(), {}
@@ -512,7 +513,7 @@ def show_sector_breakdown(df: pd.DataFrame):
     st.dataframe(styled_sec, use_container_width=True)
     st.divider()
 
-# ── HEADER ──────────────────────────────────────────────────────────────────
+# ── HEADER ─────────────────────────────────────────────────────────────────
 def draw_header():
     st.markdown("""
 ⚡ NSE STOCK SCANNER PRO ⚡
@@ -727,14 +728,4 @@ def main():
     # ── SECTOR BREAKDOWN ──
     show_sector_breakdown(df_filt if not df_filt.empty else df_res)
 
-    # ── FOOTER ──
-    if errors > 0:
-        st.info(f"ℹ️ {errors} symbols returned no data (delisted / insufficient history / API limit).")
-    st.markdown("""
-    <p style='text-align:center;color:#334444;font-family:Share Tech Mono,monospace;font-size:0.72rem;margin-top:20px;'>
-        ⚠️ FOR EDUCATIONAL & RESEARCH PURPOSES ONLY · NOT INVESTMENT ADVICE · DATA: YAHOO FINANCE / NIFTYINDICES
-    </p>
-    """, unsafe_allow_html=True)
-
-if __name__ == "__main__":
-    main()
+    # ─
