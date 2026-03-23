@@ -19,14 +19,15 @@ st.set_page_config(
 
 # ── NEON TEAL CSS THEME ──────────────────────────────────────────────────────
 st.markdown("""
+<style>
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
 
-/* ── Base ─ */
-html, body, [data-testid="stApp"], .stApp  {
+/* ── Base ── */
+html, body, [data-testid="stApp"], .stApp {
     background: #010f14 !important;
     background-image:
         radial-gradient(ellipse 80% 60% at 20% 10%, #00ffff08 0%, transparent 60%),
-        radial-gradient(ellipse 60%  80% at 80% 90%, #006d7518 0%, transparent 60%) !important;
+        radial-gradient(ellipse 60% 80% at 80% 90%, #006d7518 0%, transparent 60%) !important;
     font-family: 'Share Tech Mono', monospace !important;
 }
 
@@ -34,13 +35,13 @@ html, body, [data-testid="stApp"], .stApp  {
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: #011c22; }
 ::-webkit-scrollbar-thumb { background: #00ffff44; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background:  #00ffff99; }
+::-webkit-scrollbar-thumb:hover { background: #00ffff99; }
 
 /* ── Headers ── */
 h1 {
     font-family: 'Orbitron', monospace !important;
     color: #00ffff !important;
-    text-shadow: 0 0 20px #00ffff, 0 0 40px #00ffff60, 0 0  80px #00ffff30;
+    text-shadow: 0 0 20px #00ffff, 0 0 40px #00ffff60, 0 0 80px #00ffff30;
     letter-spacing: 3px;
 }
 h2 {
@@ -60,7 +61,7 @@ h3 {
 /* ── Sidebar ── */
 [data-testid="stSidebar"] {
     background: linear-gradient(180deg, #010f14 0%, #011c22 100%) !important;
-    border-right: 1px solid  #00ffff30 !important;
+    border-right: 1px solid #00ffff30 !important;
 }
 [data-testid="stSidebar"] h1,
 [data-testid="stSidebar"] h2,
@@ -96,7 +97,7 @@ label, .stSelectbox label, .stSlider label, .stMultiSelect label,
     font-family: 'Orbitron', monospace !important;
     color: #00ffff !important;
     font-size: 1.6rem !important;
-    text-shadow: 0  0 10px #00ffff80;
+    text-shadow: 0 0 10px #00ffff80;
 }
 [data-testid="stMetricLabel"] { color: #a0d8df !important; font-size: 0.8rem !important; }
 [data-testid="stMetricDelta"] svg { display: none; }
@@ -107,7 +108,7 @@ label, .stSelectbox label, .stSlider label, .stMultiSelect label,
     padding: 12px !important;
 }
 
-/* ── Data frame ── */
+/* ── Dataframe ── */
 [data-testid="stDataFrame"] {
     border: 1px solid #00ffff30 !important;
     border-radius: 8px !important;
@@ -118,11 +119,11 @@ label, .stSelectbox label, .stSlider label, .stMultiSelect label,
     color: #00ffff !important;
     font-family: 'Orbitron', monospace !important;
     font-size: 0.7rem !important;
-    text-transform: uppercase; 
+    text-transform: uppercase;
     border-bottom: 2px solid #00ffff50 !important;
 }
 .dataframe tbody tr { background: #010f14 !important; }
-.dataframe tbody tr:nth-child(even) { background: #011c22 !important;  }
+.dataframe tbody tr:nth-child(even) { background: #011c22 !important; }
 .dataframe tbody tr:hover { background: #00ffff10 !important; }
 .dataframe tbody td { color: #e0f7fa !important; font-size: 0.82rem !important; border-color: #00ffff15 !important; }
 
@@ -138,12 +139,12 @@ hr { border-color: #00ffff25 !important; margin: 1rem 0 !important; }
 }
 .stSlider [data-baseweb="slider"] { padding: 0.5rem 0; }
 
-/* ── Progress ─ */
+/* ── Progress ── */
 [data-testid="stProgressBar"] > div > div > div {
     background: linear-gradient(90deg, #00ffff, #39ff14) !important;
 }
 
-/* ── Alerts ─ */
+/* ── Alerts ── */
 [data-testid="stSuccess"] { background: #0a2a14 !important; border-left: 4px solid #39ff14 !important; color: #39ff14 !important; }
 [data-testid="stWarning"] { background: #2a1a00 !important; border-left: 4px solid #ffaa00 !important; }
 [data-testid="stError"] { background: #2a0a0a !important; border-left: 4px solid #ff4444 !important; }
@@ -159,12 +160,13 @@ hr { border-color: #00ffff25 !important; margin: 1rem 0 !important; }
 
 /* ── Spinner ── */
 [data-testid="stSpinner"] p { color: #00ffff !important; }
- 
-/* ── Checkbox ─ */
+
+/* ── Checkbox ── */
 .stCheckbox > label { color: #a0d8df !important; }
+</style>
 """, unsafe_allow_html=True)
 
-# ── CONSTANTS ───────────────────────────────────────────────────────────────
+# ── CONSTANTS ────────────────────────────────────────────────────────────────
 NIFTY_URL = "https://www.niftyindices.com/IndexConstituent/ind_niftytotalmarket_list.csv"
 CACHE_TTL = 3600
 
@@ -211,13 +213,13 @@ def rsi(series: pd.Series, period: int) -> float:
 
 # ── SUPPORT LOGIC ────────────────────────────────────────────────────────────
 def get_support_levels(df: pd.DataFrame, threshold_pct: float) -> tuple:
-    """Returns (is_near_support, nearest_level, yearly_low, yearly_high, monthly_ohlc_df, yearly_closes)"""
+    """Returns (is_near_support, nearest_level, yearly_low, yearly_high, monthly_ohlc_df)"""
     if df.empty:
-        return False, None, None, None, pd.DataFrame(), {}
-    
+        return False, None, None, None, pd.DataFrame()
+
     hist = df[df.index.year.isin([2020, 2021, 2022])].copy()
     if hist.empty:
-        return False, None, None, None, pd.DataFrame(), {}
+        return False, None, None, None, pd.DataFrame()
 
     monthly = hist.resample("ME").agg(
         Open=("Open", "first"),
@@ -225,15 +227,6 @@ def get_support_levels(df: pd.DataFrame, threshold_pct: float) -> tuple:
         Low=("Low", "min"),
         Close=("Close", "last"),
     ).dropna()
-
-    # Calculate yearly close for each year (last close of the year)
-    yearly_closes = {}
-    for year in [2020, 2021, 2022]:
-        year_data = hist[hist.index.year == year]
-        if not year_data.empty:
-            yearly_closes[year] = round(year_data["Close"].iloc[-1], 2)
-        else:
-            yearly_closes[year] = None
 
     yearly_low  = round(hist["Low"].min(), 2)
     yearly_high = round(hist["High"].max(), 2)
@@ -253,13 +246,14 @@ def get_support_levels(df: pd.DataFrame, threshold_pct: float) -> tuple:
 
     near = min_dist <= threshold_pct
 
-    return near, round(nearest, 2) if nearest else None, yearly_low, yearly_high, monthly, yearly_closes
+    return near, round(nearest, 2) if nearest else None, yearly_low, yearly_high, monthly
 
 # ── SCAN ONE STOCK ───────────────────────────────────────────────────────────
 def scan_stock(symbol: str, sector: str, threshold_pct: float) -> dict | None:
     df = fetch_daily_data(symbol)
     if df.empty or len(df) < 260:
         return None
+
     close = df["Close"]
     ltp   = round(close.iloc[-1], 2)
 
@@ -277,66 +271,52 @@ def scan_stock(symbol: str, sector: str, threshold_pct: float) -> dict | None:
     r126 = rsi(close, 126)
     r252 = rsi(close, 252)
 
-    near_sup, sup_level, yr_low, yr_high, _, yearly_closes = get_support_levels(df, threshold_pct)
+    near_sup, sup_level, yr_low, yr_high, _ = get_support_levels(df, threshold_pct)
 
     pct_from_200 = round((ltp / e200 - 1) * 100, 2) if e200 > 0 else 0
 
-    # Calculate 52-week high and retracement
-    one_year_ago = df.index[-1] - pd.Timedelta(days=365)
-    year_data = df[df.index >= one_year_ago]
-    week_52_high = round(year_data["High"].max(), 2) if not year_data.empty else ltp
-    retracement_52w = round((1 - ltp / week_52_high) * 100, 2) if week_52_high > 0 else 0
-
-    # LTP vs Yearly Close comparisons
-    ltp_gt_2020_close = "YES" if yearly_closes.get(2020) and ltp > yearly_closes[2020] else "NO"
-    ltp_gt_2021_close = "YES" if yearly_closes.get(2021) and ltp > yearly_closes[2021] else "NO"
-    ltp_gt_2022_close = "YES" if yearly_closes.get(2022) and ltp > yearly_closes[2022] else "NO"
-
     return {
-        "Symbol"              : symbol,
-        "Sector"              : sector,
-        "LTP"                 : ltp,
-        "10 EMA"              : e10,
-        "20 EMA"              : e20,
-        "40 EMA"              : e40,
-        "50 EMA"              : e50,
-        "200 EMA"             : e200,
-        "% vs 200EMA"         : pct_from_200,
-        "EMA Aligned"         : "YES" if aligned else "NO",
-        "LTP > 10EMA"         : "ABOVE" if ltp > e10 else "BELOW",
-        "LTP > 20EMA"         : "ABOVE" if ltp > e20 else "BELOW",
-        "LTP > 200EMA"        : "ABOVE" if ltp > e200 else "BELOW",
-        "EMA10 > EMA20"       : "YES" if e10 > e20 else "NO",
-        "EMA20 > EMA40"       : "YES" if e20 > e40 else "NO",
-        "Near Support"        : "YES" if near_sup else "-",
-        "Support Level"       : sup_level if sup_level else np.nan,
-        "2020-22 Low"         : yr_low if yr_low else np.nan,
-        "2020-22 High"        : yr_high if yr_high else np.nan,
-        "LTP > 2020 Close"    : ltp_gt_2020_close,
-        "LTP > 2021 Close"    : ltp_gt_2021_close,
-        "LTP > 2022 Close"    : ltp_gt_2022_close,
-        "52W High"            : week_52_high,
-        "Retracement 52W %"   : retracement_52w,
-        "RSI 14"              : r14,
-        "RSI 21"              : r21,
-        "RSI 63"              : r63,
-        "RSI 126"             : r126,
-        "RSI 252"             : r252,
+        "Symbol"        : symbol,
+        "Sector"        : sector,
+        "LTP"           : ltp,
+	"10 EMA"        : e10,
+        "20 EMA"        : e20,
+        "40 EMA"        : e40,
+        "50 EMA"        : e50,
+        "200 EMA"       : e200,
+        "% vs 200EMA"   : pct_from_200,
+        "EMA Aligned"   : "YES" if aligned else "NO",
+        "LTP > 10EMA"  : "ABOVE" if ltp > e10 else "BELOW",
+		"LTP > 20EMA"  : "ABOVE" if ltp > e20 else "BELOW",
+		"LTP > 200EMA"  : "ABOVE" if ltp > e200 else "BELOW",
+		"EMA10 > EMA20"  : "YES" if e10 > e20 else "NO",
+		"EMA20 > EMA40"  : "YES" if e20 > e40 else "NO",
+		"Near Support"  : "YES" if near_sup else "-",
+        "Support Level" : sup_level if sup_level else np.nan,
+        "2020-22 Low"   : yr_low if yr_low else np.nan,
+        "2020-22 High"  : yr_high if yr_high else np.nan,
+        "RSI 14"        : r14,
+        "RSI 21"        : r21,
+        "RSI 63"        : r63,
+        "RSI 126"       : r126,
+        "RSI 252"       : r252,
     }
 
 # ── STYLING ──────────────────────────────────────────────────────────────────
 RSI_COLS = ["RSI 14", "RSI 21", "RSI 63", "RSI 126", "RSI 252"]
-YEARLY_CLOSE_COLS = ["LTP > 2020 Close", "LTP > 2021 Close", "LTP > 2022 Close"]
 
 def style_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     def rsi_color(val):
-        """RSI < 50: Red, RSI >= 50: Green"""
         try:
             v = float(val)
-            if v >= 50:
+            if v >= 70:
                 return "background-color:#003d00;color:#39ff14;font-weight:bold"
+            elif v >= 50:
+                return "background-color:#001a00;color:#00e600;font-weight:bold"
+            elif v >= 30:
+                return "background-color:#2a0a0a;color:#ff6666;font-weight:bold"
             else:
-                return "background-color:#3d0000;color:#ff4444;font-weight:bold"
+                return "background-color:#3d0000;color:#ff1111;font-weight:bold"
         except:
             return ""
 
@@ -369,29 +349,6 @@ def style_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         except:
             return ""
 
-    def yearly_close_color(val):
-        """YES in Green, NO in Red"""
-        if str(val) == "YES":
-            return "background-color:#003d00;color:#39ff14;font-weight:bold;text-align:center"
-        elif str(val) == "NO":
-            return "background-color:#3d0000;color:#ff4444;font-weight:bold;text-align:center"
-        return "text-align:center"
-
-    def retracement_color(val):
-        """Lower retracement (closer to high) = Green, Higher retracement = Red"""
-        try:
-            v = float(val)
-            if v <= 10:
-                return "color:#39ff14;font-weight:bold"
-            elif v <= 25:
-                return "color:#00cc00"
-            elif v <= 40:
-                return "color:#ff8800"
-            else:
-                return "color:#ff4444;font-weight:bold"
-        except:
-            return ""
-
     try:
         # pandas >= 2.1 uses .map instead of .applymap
         styler = (
@@ -401,8 +358,6 @@ def style_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
             .map(ltp_200_color, subset=["LTP > 200EMA"])
             .map(support_color, subset=["Near Support"])
             .map(pct_color, subset=["% vs 200EMA"])
-            .map(yearly_close_color, subset=YEARLY_CLOSE_COLS)
-            .map(retracement_color, subset=["Retracement 52W %"])
             .set_properties(**{"background-color": "#010f14", "color": "#c8e6f0", "border-color": "#00ffff15"})
             .set_table_styles([
                 {"selector": "thead th", "props": [
@@ -426,8 +381,6 @@ def style_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
             .applymap(ltp_200_color, subset=["LTP > 200EMA"])
             .applymap(support_color, subset=["Near Support"])
             .applymap(pct_color, subset=["% vs 200EMA"])
-            .applymap(yearly_close_color, subset=YEARLY_CLOSE_COLS)
-            .applymap(retracement_color, subset=["Retracement 52W %"])
             .format(precision=2, na_rep="-")
         )
     return styler
@@ -438,14 +391,15 @@ def show_breadth(df: pd.DataFrame):
     n = len(df)
     if n == 0:
         return
+
     above_200      = (df["LTP > 200EMA"] == "ABOVE").sum()
     ema_aligned    = (df["EMA Aligned"] == "YES").sum()
     near_support   = (df["Near Support"] == "YES").sum()
-    rsi14_bull     = (df["RSI 14"] >= 50).sum()
+    rsi14_bull     = (df["RSI 14"] > 50).sum()
     rsi14_bear     = (df["RSI 14"] < 50).sum()
     rsi14_overbuy  = (df["RSI 14"] > 70).sum()
     rsi14_oversold = (df["RSI 14"] < 30).sum()
-    all_rsi_bull   = ((df["RSI 14"] >= 50) & (df["RSI 21"] >= 50) & (df["RSI 63"] >= 50)).sum()
+    all_rsi_bull   = ((df["RSI 14"] > 50) & (df["RSI 21"] > 50) & (df["RSI 63"] > 50)).sum()
 
     def pct(x): return f"{x} ({int(100*x/n)}%)"
 
@@ -456,13 +410,13 @@ def show_breadth(df: pd.DataFrame):
     cols[3].metric("🎯 Near Support",     str(near_support))
 
     cols2 = st.columns(4)
-    cols2[0].metric("📈 RSI14 Bullish (≥50)",   pct(rsi14_bull))
-    cols2[1].metric("📉 RSI14 Bearish (<50)",   pct(rsi14_bear))
+    cols2[0].metric("📈 RSI14 Bullish",   pct(rsi14_bull))
+    cols2[1].metric("📉 RSI14 Bearish",   pct(rsi14_bear))
     cols2[2].metric("🔥 RSI14 Overbought",pct(rsi14_overbuy))
     cols2[3].metric("💧 RSI14 Oversold",  pct(rsi14_oversold))
 
     cols3 = st.columns(4)
-    cols3[0].metric("✅ All RSI ≥50 (14/21/63)", pct(all_rsi_bull))
+    cols3[0].metric("✅ All RSI>50 (14/21/63)", pct(all_rsi_bull))
     pct_above = int(100 * above_200 / n)
     breadth_status = "🟢 BULLISH" if pct_above > 60 else ("🔴 BEARISH" if pct_above < 40 else "🟡 NEUTRAL")
     cols3[1].metric("📊 Overall Breadth", breadth_status)
@@ -478,6 +432,7 @@ def show_sector_breakdown(df: pd.DataFrame):
     st.markdown("## 🏭 Sector Breakdown")
     if "Sector" not in df.columns:
         return
+
     sec = df.groupby("Sector").agg(
         Count          = ("Symbol", "count"),
         Avg_RSI14      = ("RSI 14", "mean"),
@@ -513,38 +468,57 @@ def show_sector_breakdown(df: pd.DataFrame):
     st.dataframe(styled_sec, use_container_width=True)
     st.divider()
 
-# ── HEADER ─────────────────────────────────────────────────────────────────
+# ── HEADER ──────────────────────────────────────────────────────────────────
 def draw_header():
     st.markdown("""
-⚡ NSE STOCK SCANNER PRO ⚡
-NIFTY TOTAL MARKET  ·  SUPPORT ZONES 2020–2022  ·  EMA  ·  RSI  ·  BREADTH
-📡 LIVE DATA
-🇮🇳 NSE INDIA
-⚙️ POWERED BY YFINANCE
-""", unsafe_allow_html=True)
+    <div style="text-align:center;padding:30px 0 10px 0;">
+        <h1 style="font-size:2.6rem;letter-spacing:5px;margin-bottom:4px;">
+            ⚡ NSE STOCK SCANNER PRO ⚡
+        </h1>
+        <p style="color:#00ffff80;font-family:'Share Tech Mono',monospace;font-size:0.9rem;letter-spacing:3px;margin:0;">
+            NIFTY TOTAL MARKET  ·  SUPPORT ZONES 2020–2022  ·  EMA  ·  RSI  ·  BREADTH
+        </p>
+        <div style="margin-top:12px;display:flex;justify-content:center;gap:20px;flex-wrap:wrap;">
+            <span style="background:#001c25;border:1px solid #00ffff30;border-radius:4px;padding:4px 12px;color:#00ffff;font-size:0.75rem;font-family:'Share Tech Mono'">📡 LIVE DATA</span>
+            <span style="background:#001c25;border:1px solid #39ff1430;border-radius:4px;padding:4px 12px;color:#39ff14;font-size:0.75rem;font-family:'Share Tech Mono'">🇮🇳 NSE INDIA</span>
+            <span style="background:#001c25;border:1px solid #ff6ec730;border-radius:4px;padding:4px 12px;color:#ff6ec7;font-size:0.75rem;font-family:'Share Tech Mono'">⚙️ POWERED BY YFINANCE</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     st.divider()
 
 # ── IDLE SCREEN ───────────────────────────────────────────────────────────────
 def draw_idle():
     st.markdown("""
-📡
-AWAITING SCAN COMMAND
-Configure filters in the sidebar → click START SCANNING
-🎯
-Support Zones from 2020–2022 Monthly Data
-📈
-EMA 20/50/200 Alignment Check
-🌊
-RSI 14/21/63/126/252 Multi-Timeframe
-📊
-LTP vs Yearly Close (2020/2021/2022)
-📉
-52-Week High Retracement
-""", unsafe_allow_html=True)
+    <div style="text-align:center;padding:80px 0;opacity:0.55;">
+        <div style="font-size:4rem;margin-bottom:20px;">📡</div>
+        <p style="color:#00ffff;font-family:'Orbitron',monospace;font-size:1.1rem;letter-spacing:3px;">
+            AWAITING SCAN COMMAND
+        </p>
+        <p style="color:#a0d8df;font-family:'Share Tech Mono',monospace;font-size:0.85rem;">
+            Configure filters in the sidebar → click <strong>START SCANNING</strong>
+        </p>
+        <div style="margin-top:30px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px;max-width:700px;margin-left:auto;margin-right:auto;">
+            <div style="background:#011c22;border:1px solid #00ffff20;border-radius:8px;padding:16px;">
+                <div style="color:#00ffff;font-size:1.4rem;">🎯</div>
+                <p style="color:#a0d8df;font-size:0.78rem;margin-top:6px;">Support Zones from<br>2020–2022 Monthly Data</p>
+            </div>
+            <div style="background:#011c22;border:1px solid #39ff1420;border-radius:8px;padding:16px;">
+                <div style="color:#39ff14;font-size:1.4rem;">📈</div>
+                <p style="color:#a0d8df;font-size:0.78rem;margin-top:6px;">EMA 20/50/200<br>Alignment Check</p>
+            </div>
+            <div style="background:#011c22;border:1px solid #ff6ec720;border-radius:8px;padding:16px;">
+                <div style="color:#ff6ec7;font-size:1.4rem;">🌊</div>
+                <p style="color:#a0d8df;font-size:0.78rem;margin-top:6px;">RSI 14/21/63/126/252<br>Multi-Timeframe</p>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 # ── MAIN ─────────────────────────────────────────────────────────────────────
 def main():
     draw_header()
+
     # ── SIDEBAR ──
     with st.sidebar:
         st.markdown("### ⚙️ SCANNER CONFIG")
@@ -558,26 +532,25 @@ def main():
 
         st.markdown("---")
         st.markdown("### 🔍 FILTERS")
-        filter_near_support = st.checkbox("Near Support Only", False)
-        filter_ema_aligned  = st.checkbox("EMA Aligned Only",  False)
+        filter_near_support = st.checkbox("Near Support Only",  False)
+        filter_ema_aligned  = st.checkbox("EMA Aligned Only",   False)
         filter_above_200    = st.checkbox("Above 200 EMA Only", False)
-        filter_rsi14_bull   = st.checkbox("RSI14 ≥ 50 Only",    False)
+        filter_rsi14_bull   = st.checkbox("RSI14 > 50 Only",    False)
 
         st.markdown("---")
         st.markdown("### 📊 SORT BY")
-        sort_col = st.selectbox("Column", ["RSI 14", "LTP", "% vs 200EMA", "RSI 63", "Symbol", "Retracement 52W %"])
+        sort_col = st.selectbox("Column", ["RSI 14", "LTP", "% vs 200EMA", "RSI 63", "Symbol"])
         sort_asc = st.checkbox("Ascending", False)
 
         st.markdown("---")
         st.markdown("""
         <div style='color:#445555;font-size:0.72rem;font-family:Share Tech Mono,monospace;line-height:1.8;'>
-        🟢 RSI ≥ 50  Bullish (Green) <br>
-        🔴 RSI < 50  Bearish (Red) <br>
-        ───────────────────── <br>
-        ✅ LTP > Yearly Close = YES (Green) <br>
-        ❌ LTP > Yearly Close = NO (Red) <br>
-        ───────────────────── <br>
-        ⚡ Near Support = within {threshold}% of <br>
+        🟢 RSI > 70  Overbought<br>
+        🟡 RSI > 50  Bullish<br>
+        🟠 RSI < 50  Bearish<br>
+        🔴 RSI < 30  Oversold<br>
+        ─────────────────────<br>
+        ⚡ Near Support = within {threshold}% of<br>
         monthly lows (2020–22)
         </div>
         """.format(threshold=support_threshold), unsafe_allow_html=True)
@@ -596,10 +569,10 @@ def main():
         st.info("ℹ️ niftyindices.com may block direct requests. Using a fallback sample list.")
         # Minimal fallback
         stocks_df = pd.DataFrame({
-            "Symbol": ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "HINDUNILVR", "SBIN", "BHARTIARTL", "ITC", "KOTAKBANK",
-                       "WIPRO", "LTIM", "AXISBANK", "MARUTI", "SUNPHARMA", "TITAN", "NESTLEIND", "POWERGRID", "NTPC", "ULTRACEMCO"],
-            "Industry": ["ENERGY", "IT", "FINANCIALS", "IT", "FINANCIALS", "FMCG", "FINANCIALS", "TELECOM", "FMCG", "FINANCIALS",
-                         "IT", "IT", "FINANCIALS", "AUTO", "PHARMA", "CONSUMER", "FMCG", "UTILITIES", "UTILITIES", "CEMENT"],
+            "Symbol": ["RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK","HINDUNILVR","SBIN","BHARTIARTL","ITC","KOTAKBANK",
+                       "WIPRO","LTIM","AXISBANK","MARUTI","SUNPHARMA","TITAN","NESTLEIND","POWERGRID","NTPC","ULTRACEMCO"],
+            "Industry": ["ENERGY","IT","FINANCIALS","IT","FINANCIALS","FMCG","FINANCIALS","TELECOM","FMCG","FINANCIALS",
+                         "IT","IT","FINANCIALS","AUTO","PHARMA","CONSUMER","FMCG","UTILITIES","UTILITIES","CEMENT"],
         })
         st.warning(f"Using fallback list of {len(stocks_df)} stocks.")
     else:
@@ -639,11 +612,11 @@ def main():
     </p>
     """, unsafe_allow_html=True)
 
-    prog_bar = st.progress(0)
+    prog_bar  = st.progress(0)
     status_ph = st.empty()
-    results = []
-    errors = 0
-    total = len(stocks_df)
+    results   = []
+    errors    = 0
+    total     = len(stocks_df)
 
     for i, (_, row) in enumerate(stocks_df.iterrows()):
         symbol = str(row[sym_col]).strip().upper()
@@ -681,7 +654,7 @@ def main():
     if filter_near_support: df_filt = df_filt[df_filt["Near Support"] == "YES"]
     if filter_ema_aligned:  df_filt = df_filt[df_filt["EMA Aligned"]  == "YES"]
     if filter_above_200:    df_filt = df_filt[df_filt["LTP > 200EMA"] == "ABOVE"]
-    if filter_rsi14_bull:   df_filt = df_filt[df_filt["RSI 14"] >= 50]
+    if filter_rsi14_bull:   df_filt = df_filt[df_filt["RSI 14"] > 50]
 
     if sort_col in df_filt.columns:
         df_filt = df_filt.sort_values(sort_col, ascending=sort_asc)
@@ -690,14 +663,14 @@ def main():
     show_breadth(df_res)
 
     # ── RESULTS TABLE ──
-    st.markdown(f"## 📋 Scanner Results  &nbsp; <span style='color:#00ffff80;font-size:1rem;font-family:Share Tech Mono'>{len(df_filt)} / {len(df_res)} stocks</span>", unsafe_allow_html=True)
+    st.markdown(f"## 📋 Scanner Results &nbsp; <span style='color:#00ffff80;font-size:1rem;font-family:Share Tech Mono'>{len(df_filt)} / {len(df_res)} stocks</span>", unsafe_allow_html=True)
 
     st.markdown("""
     <div style='background:#011c22;border:1px solid #00ffff20;border-radius:6px;padding:10px 16px;margin-bottom:12px;font-family:Share Tech Mono,monospace;font-size:0.78rem;display:flex;gap:24px;flex-wrap:wrap;'>
-        <span><span style='color:#39ff14'>■</span> RSI ≥ 50 Bullish (Green)</span>
-        <span><span style='color:#ff4444'>■</span> RSI < 50 Bearish (Red)</span>
-        <span><span style='color:#39ff14'>■</span> LTP > Yearly Close = YES (Green)</span>
-        <span><span style='color:#ff4444'>■</span> LTP > Yearly Close = NO (Red)</span>
+        <span><span style='color:#39ff14'>■</span> RSI ≥ 70 Overbought</span>
+        <span><span style='color:#00e600'>■</span> RSI 50-70 Bullish</span>
+        <span><span style='color:#ff6666'>■</span> RSI 30-50 Bearish</span>
+        <span><span style='color:#ff1111'>■</span> RSI ≤ 30 Oversold</span>
         <span><span style='color:#00ffff'>■</span> Near Support Zone</span>
         <span><span style='color:#39ff14'>■</span> EMA Aligned Bullish</span>
     </div>
@@ -728,4 +701,14 @@ def main():
     # ── SECTOR BREAKDOWN ──
     show_sector_breakdown(df_filt if not df_filt.empty else df_res)
 
-    # ─
+    # ── FOOTER ──
+    if errors > 0:
+        st.info(f"ℹ️ {errors} symbols returned no data (delisted / insufficient history / API limit).")
+    st.markdown("""
+    <p style='text-align:center;color:#334444;font-family:Share Tech Mono,monospace;font-size:0.72rem;margin-top:20px;'>
+        ⚠️ FOR EDUCATIONAL & RESEARCH PURPOSES ONLY · NOT INVESTMENT ADVICE · DATA: YAHOO FINANCE / NIFTYINDICES
+    </p>
+    """, unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()
