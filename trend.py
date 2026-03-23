@@ -9,284 +9,419 @@ import time
 import warnings
 warnings.filterwarnings("ignore")
 
-# ── PAGE CONFIG ──────────────────────────────────────────────────────────────
+# ── Optional heavy deps ───────────────────────────────────────────────────────
+try:
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    import plotly.express as px
+    HAS_PLOTLY = True
+except ImportError:
+    HAS_PLOTLY = False
+
+try:
+    from scipy.signal import argrelextrema
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+
+try:
+    from pypfopt import EfficientFrontier, risk_models, expected_returns
+    HAS_PYPFOPT = True
+except ImportError:
+    HAS_PYPFOPT = False
+
+try:
+    from sklearn.cluster import KMeans
+    from sklearn.preprocessing import StandardScaler
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
+
+# ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="NSE Stock Scanner Pro",
-    page_icon="⚡",
+    page_title="AlphaMomentum — NSE Scanner",
+    page_icon="◈",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ── NEON TEAL CSS THEME ──────────────────────────────────────────────────────
+# ── THEME ─────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap');
 
-/* ── Base ── */
-html, body, [data-testid="stApp"], .stApp {
-    background: #010f14 !important;
-    background-image:
-        radial-gradient(ellipse 80% 60% at 20% 10%, #00ffff08 0%, transparent 60%),
-        radial-gradient(ellipse 60% 80% at 80% 90%, #006d7518 0%, transparent 60%) !important;
-    font-family: 'Share Tech Mono', monospace !important;
+:root {
+    --bg:       #080c10;
+    --bg2:      #0d1520;
+    --bg3:      #111d2e;
+    --border:   #1e3a5f;
+    --cyan:     #00d4ff;
+    --gold:     #f5a623;
+    --green:    #00e676;
+    --red:      #ff4d6d;
+    --muted:    #4a7090;
+    --text:     #cde4f5;
 }
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #011c22; }
-::-webkit-scrollbar-thumb { background: #00ffff44; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #00ffff99; }
+html, body, [data-testid="stApp"] {
+    background: var(--bg) !important;
+    font-family: 'Space Mono', monospace !important;
+    color: var(--text) !important;
+}
 
-/* ── Headers ── */
+/* Animated grid background */
+[data-testid="stApp"]::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 48px 48px;
+    opacity: 0.18;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background: var(--bg2) !important;
+    border-right: 1px solid var(--border) !important;
+}
+[data-testid="stSidebar"] * { font-family: 'Space Mono', monospace !important; }
+
+/* All text */
+p, label, span, div { color: var(--text) !important; font-family: 'Space Mono', monospace !important; }
+
+/* Headers */
 h1 {
-    font-family: 'Orbitron', monospace !important;
-    color: #00ffff !important;
-    text-shadow: 0 0 20px #00ffff, 0 0 40px #00ffff60, 0 0 80px #00ffff30;
-    letter-spacing: 3px;
+    font-family: 'Syne', sans-serif !important;
+    font-weight: 800 !important;
+    font-size: 2.8rem !important;
+    letter-spacing: -1px !important;
+    background: linear-gradient(135deg, var(--cyan) 0%, #7b8fff 60%, var(--gold) 100%);
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    background-clip: text !important;
+    margin-bottom: 0 !important;
 }
 h2 {
-    font-family: 'Orbitron', monospace !important;
-    color: #39ff14 !important;
-    text-shadow: 0 0 15px #39ff1480;
-    letter-spacing: 2px;
-    border-bottom: 1px solid #39ff1430;
-    padding-bottom: 8px;
+    font-family: 'Syne', sans-serif !important;
+    font-weight: 700 !important;
+    color: var(--cyan) !important;
+    letter-spacing: 1px !important;
+    font-size: 1.2rem !important;
+    text-transform: uppercase !important;
+    border-left: 3px solid var(--gold) !important;
+    padding-left: 12px !important;
+    margin: 1.5rem 0 1rem 0 !important;
 }
 h3 {
-    color: #ff6ec7 !important;
-    text-shadow: 0 0 10px #ff6ec780;
-    font-family: 'Orbitron', monospace !important;
-}
-
-/* ── Sidebar ── */
-[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #010f14 0%, #011c22 100%) !important;
-    border-right: 1px solid #00ffff30 !important;
-}
-[data-testid="stSidebar"] h1,
-[data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3 { font-size: 1rem !important; }
-[data-testid="stSidebar"] p,
-[data-testid="stSidebar"] label,
-[data-testid="stSidebar"] .st-emotion-cache-1y4p8pa { color: #a0d8df !important; }
-
-/* ── Widget labels ── */
-label, .stSelectbox label, .stSlider label, .stMultiSelect label,
-.stCheckbox label span, p { color: #a0d8df !important; }
-
-/* ── Buttons ── */
-.stButton > button {
-    background: linear-gradient(135deg, #003d4d 0%, #005566 100%) !important;
-    color: #00ffff !important;
-    border: 1px solid #00ffff !important;
-    border-radius: 4px !important;
-    font-family: 'Orbitron', monospace !important;
-    font-weight: 700 !important;
+    font-family: 'Syne', sans-serif !important;
+    font-weight: 600 !important;
+    color: var(--gold) !important;
+    font-size: 1rem !important;
+    text-transform: uppercase !important;
     letter-spacing: 2px !important;
-    box-shadow: 0 0 15px #00ffff40, inset 0 0 15px #00ffff10 !important;
-    transition: all 0.3s !important;
-    padding: 0.5rem 2rem !important;
-}
-.stButton > button:hover {
-    box-shadow: 0 0 30px #00ffff80, inset 0 0 20px #00ffff20 !important;
-    transform: translateY(-1px);
 }
 
-/* ── Metrics ── */
-[data-testid="stMetricValue"] {
-    font-family: 'Orbitron', monospace !important;
-    color: #00ffff !important;
-    font-size: 1.6rem !important;
-    text-shadow: 0 0 10px #00ffff80;
-}
-[data-testid="stMetricLabel"] { color: #a0d8df !important; font-size: 0.8rem !important; }
-[data-testid="stMetricDelta"] svg { display: none; }
-[data-testid="metric-container"] {
-    background: #011c2280 !important;
-    border: 1px solid #00ffff20 !important;
-    border-radius: 8px !important;
-    padding: 12px !important;
-}
-
-/* ── Dataframe ── */
-[data-testid="stDataFrame"] {
-    border: 1px solid #00ffff30 !important;
-    border-radius: 8px !important;
+/* Buttons */
+.stButton > button {
+    background: transparent !important;
+    color: var(--cyan) !important;
+    border: 1px solid var(--cyan) !important;
+    border-radius: 2px !important;
+    font-family: 'Space Mono', monospace !important;
+    font-size: 0.78rem !important;
+    letter-spacing: 2px !important;
+    padding: 0.6rem 2.5rem !important;
+    text-transform: uppercase !important;
+    transition: all 0.2s !important;
+    position: relative !important;
     overflow: hidden !important;
 }
-.dataframe thead th {
-    background: #003d4d !important;
-    color: #00ffff !important;
-    font-family: 'Orbitron', monospace !important;
-    font-size: 0.7rem !important;
-    text-transform: uppercase;
-    border-bottom: 2px solid #00ffff50 !important;
+.stButton > button::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--cyan);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.2s;
+    z-index: -1;
 }
-.dataframe tbody tr { background: #010f14 !important; }
-.dataframe tbody tr:nth-child(even) { background: #011c22 !important; }
-.dataframe tbody tr:hover { background: #00ffff10 !important; }
-.dataframe tbody td { color: #e0f7fa !important; font-size: 0.82rem !important; border-color: #00ffff15 !important; }
+.stButton > button:hover {
+    color: var(--bg) !important;
+    background: var(--cyan) !important;
+    box-shadow: 0 0 24px #00d4ff60 !important;
+}
 
-/* ── Divider ── */
-hr { border-color: #00ffff25 !important; margin: 1rem 0 !important; }
+/* Metrics */
+[data-testid="metric-container"] {
+    background: var(--bg2) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 4px !important;
+    padding: 16px !important;
+    position: relative !important;
+    overflow: hidden !important;
+}
+[data-testid="metric-container"]::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--cyan), transparent);
+}
+[data-testid="stMetricValue"] {
+    font-family: 'Syne', sans-serif !important;
+    font-size: 1.8rem !important;
+    font-weight: 800 !important;
+    color: var(--cyan) !important;
+}
+[data-testid="stMetricLabel"] {
+    color: var(--muted) !important;
+    font-size: 0.68rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1px !important;
+}
+[data-testid="stMetricDelta"] { color: var(--green) !important; }
 
-/* ── Select / Input ── */
+/* Dataframe */
+[data-testid="stDataFrame"] {
+    border: 1px solid var(--border) !important;
+    border-radius: 4px !important;
+}
+
+/* Tabs */
+[data-testid="stTabs"] [role="tab"] {
+    font-family: 'Space Mono', monospace !important;
+    font-size: 0.72rem !important;
+    letter-spacing: 1.5px !important;
+    text-transform: uppercase !important;
+    color: var(--muted) !important;
+    border-bottom: 2px solid transparent !important;
+    padding: 8px 20px !important;
+}
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+    color: var(--cyan) !important;
+    border-bottom: 2px solid var(--cyan) !important;
+}
+[data-testid="stTabs"] [role="tablist"] {
+    border-bottom: 1px solid var(--border) !important;
+    gap: 4px !important;
+}
+
+/* Inputs */
 .stSelectbox > div > div,
 .stMultiSelect > div > div {
-    background: #011c22 !important;
-    color: #00ffff !important;
-    border: 1px solid #00ffff30 !important;
+    background: var(--bg2) !important;
+    border: 1px solid var(--border) !important;
+    color: var(--text) !important;
+    border-radius: 2px !important;
 }
-.stSlider [data-baseweb="slider"] { padding: 0.5rem 0; }
-
-/* ── Progress ── */
+.stSlider [data-baseweb="slider"] { padding: 0.4rem 0 !important; }
 [data-testid="stProgressBar"] > div > div > div {
-    background: linear-gradient(90deg, #00ffff, #39ff14) !important;
+    background: linear-gradient(90deg, var(--cyan), var(--gold)) !important;
 }
 
-/* ── Alerts ── */
-[data-testid="stSuccess"] { background: #0a2a14 !important; border-left: 4px solid #39ff14 !important; color: #39ff14 !important; }
-[data-testid="stWarning"] { background: #2a1a00 !important; border-left: 4px solid #ffaa00 !important; }
-[data-testid="stError"] { background: #2a0a0a !important; border-left: 4px solid #ff4444 !important; }
-[data-testid="stInfo"] { background: #00131a !important; border-left: 4px solid #00ffff !important; }
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-/* ── Download button ── */
+/* Alerts */
+[data-testid="stSuccess"] { background: #001a0a !important; border-left: 3px solid var(--green) !important; }
+[data-testid="stWarning"] { background: #1a1000 !important; border-left: 3px solid var(--gold) !important; }
+[data-testid="stError"]   { background: #1a0008 !important; border-left: 3px solid var(--red) !important; }
+[data-testid="stInfo"]    { background: #00101a !important; border-left: 3px solid var(--cyan) !important; }
+
+/* Download button */
 .stDownloadButton > button {
-    background: #001520 !important;
-    color: #39ff14 !important;
-    border: 1px solid #39ff14 !important;
-    font-family: 'Share Tech Mono', monospace !important;
+    background: transparent !important;
+    color: var(--gold) !important;
+    border: 1px solid var(--gold) !important;
+    font-family: 'Space Mono', monospace !important;
+    font-size: 0.72rem !important;
 }
+.stDownloadButton > button:hover { background: var(--gold) !important; color: var(--bg) !important; }
 
-/* ── Spinner ── */
-[data-testid="stSpinner"] p { color: #00ffff !important; }
+/* Divider */
+hr { border-color: var(--border) !important; }
 
-/* ── Checkbox ── */
-.stCheckbox > label { color: #a0d8df !important; }
+/* Checkbox */
+.stCheckbox label span { color: var(--text) !important; font-size: 0.78rem !important; }
+
+/* Spinner */
+[data-testid="stSpinner"] p { color: var(--cyan) !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── CONSTANTS ────────────────────────────────────────────────────────────────
+# ── CONSTANTS ─────────────────────────────────────────────────────────────────
 NIFTY_URL = "https://www.niftyindices.com/IndexConstituent/ind_niftytotalmarket_list.csv"
 CACHE_TTL = 3600
+PLOTLY_DARK = dict(
+    plot_bgcolor="#080c10",
+    paper_bgcolor="#0d1520",
+    font_color="#cde4f5",
+    font_family="Space Mono",
+    xaxis=dict(gridcolor="#1e3a5f", zerolinecolor="#1e3a5f"),
+    yaxis=dict(gridcolor="#1e3a5f", zerolinecolor="#1e3a5f"),
+)
 
-# ── HELPERS ──────────────────────────────────────────────────────────────────
+# ── DATA FETCHERS ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=86400, show_spinner=False)
 def fetch_stock_list():
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
         r = requests.get(NIFTY_URL, headers=headers, timeout=20)
         r.raise_for_status()
         df = pd.read_csv(StringIO(r.text))
         df.columns = [c.strip() for c in df.columns]
         return df
-    except Exception as e:
-        return pd.DataFrame(), str(e)
-
-@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def fetch_daily_data(symbol: str):
-    try:
-        ticker = yf.Ticker(f"{symbol}.NS")
-        df = ticker.history(start="2019-12-01", interval="1d", auto_adjust=True)
-        if df.empty:
-            return pd.DataFrame()
-        df.index = pd.to_datetime(df.index).tz_localize(None)
-        df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
-        return df
     except Exception:
         return pd.DataFrame()
 
-# ── INDICATOR CALCULATIONS ───────────────────────────────────────────────────
-def ema(series: pd.Series, period: int) -> pd.Series:
-    return series.ewm(span=period, adjust=False).mean()
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+def fetch_daily_data(symbol: str) -> pd.DataFrame:
+    try:
+        df = yf.Ticker(f"{symbol}.NS").history(start="2019-01-01", interval="1d", auto_adjust=True)
+        if df.empty:
+            return pd.DataFrame()
+        df.index = pd.to_datetime(df.index).tz_localize(None)
+        return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
+    except Exception:
+        return pd.DataFrame()
 
-def rsi(series: pd.Series, period: int) -> float:
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    ag = gain.ewm(com=period - 1, min_periods=period).mean()
-    al = loss.ewm(com=period - 1, min_periods=period).mean()
-    rs = ag / al.replace(0, np.nan)
-    r = 100 - (100 / (1 + rs))
-    last = r.iloc[-1]
-    return round(last, 1) if pd.notna(last) else np.nan
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+def fetch_close_matrix(symbols: list, start: str = "2022-01-01") -> pd.DataFrame:
+    """Fetch close prices for multiple symbols for portfolio optimization."""
+    frames = {}
+    for sym in symbols:
+        df = fetch_daily_data(sym)
+        if not df.empty:
+            frames[sym] = df["Close"]
+    if not frames:
+        return pd.DataFrame()
+    combined = pd.DataFrame(frames)
+    combined = combined[combined.index >= start]
+    return combined.dropna(axis=1, thresh=int(0.8 * len(combined)))
 
-# ── SUPPORT LOGIC ────────────────────────────────────────────────────────────
-def get_support_levels(df: pd.DataFrame, threshold_pct: float) -> tuple:
-    """Returns (is_near_support, nearest_level, yearly_low, yearly_high, monthly_ohlc_df)"""
-    if df.empty:
-        return False, None, None, None, pd.DataFrame()
+# ── INDICATORS ────────────────────────────────────────────────────────────────
+def ema(s: pd.Series, n: int) -> pd.Series:
+    return s.ewm(span=n, adjust=False).mean()
 
-    hist = df[df.index.year.isin([2020, 2021, 2022])].copy()
-    if hist.empty:
-        return False, None, None, None, pd.DataFrame()
+def rsi(s: pd.Series, n: int) -> float:
+    d = s.diff()
+    ag = d.clip(lower=0).ewm(com=n - 1, min_periods=n).mean()
+    al = (-d.clip(upper=0)).ewm(com=n - 1, min_periods=n).mean()
+    r = 100 - 100 / (1 + ag / al.replace(0, np.nan))
+    v = r.iloc[-1]
+    return round(float(v), 1) if pd.notna(v) else np.nan
 
-    monthly = hist.resample("ME").agg(
-        Open=("Open", "first"),
-        High=("High", "max"),
-        Low=("Low", "min"),
-        Close=("Close", "last"),
-    ).dropna()
+def macd(s: pd.Series):
+    fast, slow, sig = ema(s, 12), ema(s, 26), None
+    line = fast - slow
+    sig = ema(line, 9)
+    hist = line - sig
+    return line, sig, hist
 
-    yearly_low  = round(hist["Low"].min(), 2)
-    yearly_high = round(hist["High"].max(), 2)
+def atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
+    h, l, pc = df["High"], df["Low"], df["Close"].shift(1)
+    tr = pd.concat([h - l, (h - pc).abs(), (l - pc).abs()], axis=1).max(axis=1)
+    return tr.ewm(span=n, adjust=False).mean()
 
-    # Support candidates: monthly lows + yearly low
-    levels = monthly["Low"].tolist() + [yearly_low]
+def bollinger(s: pd.Series, n: int = 20, k: float = 2.0):
+    mid = s.rolling(n).mean()
+    std = s.rolling(n).std()
+    return mid, mid + k * std, mid - k * std
+
+# ── SUPPORT DETECTION ─────────────────────────────────────────────────────────
+def find_support_zones(df: pd.DataFrame, order: int = 10) -> list:
+    """Use scipy local minima OR fallback rolling window."""
+    lows = df["Low"].values
+    if HAS_SCIPY:
+        idx = argrelextrema(lows, np.less_equal, order=order)[0]
+    else:
+        idx = []
+        for i in range(order, len(lows) - order):
+            window = lows[i - order:i + order + 1]
+            if lows[i] == window.min():
+                idx.append(i)
+    levels = sorted(set(round(lows[i], 2) for i in idx))
     ltp = df["Close"].iloc[-1]
+    # Keep levels below LTP + 20%
+    return [l for l in levels if l < ltp * 1.20]
 
-    nearest = None
-    min_dist = float("inf")
-    for lvl in levels:
-        if lvl > 0:
-            dist = abs(ltp - lvl) / lvl
-            if dist < min_dist:
-                min_dist = dist
-                nearest = lvl
+def nearest_support(df: pd.DataFrame, threshold_pct: float):
+    zones = find_support_zones(df)
+    ltp = df["Close"].iloc[-1]
+    if not zones:
+        return False, None, zones
+    dists = [(abs(ltp - z) / z, z) for z in zones if z > 0]
+    dists.sort()
+    nearest_dist, nearest_lvl = dists[0]
+    return nearest_dist <= threshold_pct, round(nearest_lvl, 2), zones
 
-    near = min_dist <= threshold_pct
-
-    return near, round(nearest, 2) if nearest else None, yearly_low, yearly_high, monthly
-
-# ── SCAN ONE STOCK ───────────────────────────────────────────────────────────
+# ── SCAN ONE STOCK ────────────────────────────────────────────────────────────
 def scan_stock(symbol: str, sector: str, threshold_pct: float) -> dict | None:
     df = fetch_daily_data(symbol)
     if df.empty or len(df) < 260:
         return None
 
-    close = df["Close"]
-    ltp   = round(close.iloc[-1], 2)
+    c = df["Close"]
+    ltp = round(c.iloc[-1], 2)
 
-    e20  = round(ema(close, 20).iloc[-1], 2)
-    e50  = round(ema(close, 50).iloc[-1], 2)
-    e200 = round(ema(close, 200).iloc[-1], 2)
+    e20, e50, e200 = ema(c, 20), ema(c, 50), ema(c, 200)
+    e20v, e50v, e200v = round(e20.iloc[-1], 2), round(e50.iloc[-1], 2), round(e200.iloc[-1], 2)
+    aligned = ltp > e20v > e50v > e200v
 
-    aligned = bool(ltp > e20 > e50 > e200)
+    r14  = rsi(c, 14)
+    r21  = rsi(c, 21)
+    r63  = rsi(c, 63)
+    r126 = rsi(c, 126)
+    r252 = rsi(c, 252)
 
-    r14  = rsi(close, 14)
-    r21  = rsi(close, 21)
-    r63  = rsi(close, 63)
-    r126 = rsi(close, 126)
-    r252 = rsi(close, 252)
+    near_sup, sup_level, _ = nearest_support(df, threshold_pct)
+    pct_200 = round((ltp / e200v - 1) * 100, 2) if e200v > 0 else 0
 
-    near_sup, sup_level, yr_low, yr_high, _ = get_support_levels(df, threshold_pct)
+    # 52-week high/low
+    yr = df[df.index >= df.index[-1] - pd.Timedelta(days=365)]
+    wk52_h = round(yr["High"].max(), 2)
+    wk52_l = round(yr["Low"].min(), 2)
+    pct_from_52h = round((ltp / wk52_h - 1) * 100, 2)
 
-    pct_from_200 = round((ltp / e200 - 1) * 100, 2) if e200 > 0 else 0
+    # Volume ratio (20d avg vs 50d avg)
+    vol_ratio = round(df["Volume"].iloc[-20:].mean() / (df["Volume"].iloc[-50:].mean() + 1), 2)
+
+    # ATR %
+    atr_val = atr(df, 14).iloc[-1]
+    atr_pct = round(atr_val / ltp * 100, 2)
+
+    _, bb_upper, bb_lower = bollinger(c)
+    bb_pct = round((ltp - bb_lower.iloc[-1]) / (bb_upper.iloc[-1] - bb_lower.iloc[-1] + 1e-9) * 100, 1)
+
+    macd_line, macd_sig, _ = macd(c)
+    macd_bull = bool(macd_line.iloc[-1] > macd_sig.iloc[-1])
 
     return {
         "Symbol"        : symbol,
         "Sector"        : sector,
         "LTP"           : ltp,
-        "20 EMA"        : e20,
-        "50 EMA"        : e50,
-        "200 EMA"       : e200,
-        "% vs 200EMA"   : pct_from_200,
-        "EMA Aligned"   : "YES" if aligned else "NO",
-        "LTP > 200EMA"  : "ABOVE" if ltp > e200 else "BELOW",
-        "Near Support"  : "YES" if near_sup else "-",
+        "20 EMA"        : e20v,
+        "50 EMA"        : e50v,
+        "200 EMA"       : e200v,
+        "% vs 200EMA"   : pct_200,
+        "% from 52W High": pct_from_52h,
+        "EMA Aligned"   : "✓" if aligned else "✗",
+        "LTP vs 200EMA" : "ABOVE" if ltp > e200v else "BELOW",
+        "Near Support"  : "✓" if near_sup else "–",
         "Support Level" : sup_level if sup_level else np.nan,
-        "2020-22 Low"   : yr_low if yr_low else np.nan,
-        "2020-22 High"  : yr_high if yr_high else np.nan,
+        "52W High"      : wk52_h,
+        "52W Low"       : wk52_l,
+        "Vol Ratio"     : vol_ratio,
+        "ATR %"         : atr_pct,
+        "BB %"          : bb_pct,
+        "MACD Bull"     : "✓" if macd_bull else "✗",
         "RSI 14"        : r14,
         "RSI 21"        : r21,
         "RSI 63"        : r63,
@@ -294,413 +429,721 @@ def scan_stock(symbol: str, sector: str, threshold_pct: float) -> dict | None:
         "RSI 252"       : r252,
     }
 
-# ── STYLING ──────────────────────────────────────────────────────────────────
-RSI_COLS = ["RSI 14", "RSI 21", "RSI 63", "RSI 126", "RSI 252"]
+# ── TABLE STYLING ─────────────────────────────────────────────────────────────
+def style_table(df: pd.DataFrame):
+    RSI_COLS = [c for c in ["RSI 14", "RSI 21", "RSI 63", "RSI 126", "RSI 252"] if c in df.columns]
 
-def style_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
-    def rsi_color(val):
+    def rsi_col(v):
         try:
-            v = float(val)
-            if v >= 70:
-                return "background-color:#003d00;color:#39ff14;font-weight:bold"
-            elif v >= 50:
-                return "background-color:#001a00;color:#00e600;font-weight:bold"
-            elif v >= 30:
-                return "background-color:#2a0a0a;color:#ff6666;font-weight:bold"
-            else:
-                return "background-color:#3d0000;color:#ff1111;font-weight:bold"
-        except:
-            return ""
+            v = float(v)
+            if v >= 70:   return "background:#003d1a;color:#00e676;font-weight:700"
+            elif v >= 50: return "background:#001f0d;color:#4ddb8a"
+            elif v >= 30: return "background:#1f0008;color:#ff8fa3"
+            else:         return "background:#3d0010;color:#ff4d6d;font-weight:700"
+        except: return ""
 
-    def ema_align_color(val):
-        if str(val) == "YES":
-            return "background-color:#003d00;color:#39ff14;font-weight:bold;text-align:center"
-        return "background-color:#2a0a0a;color:#ff4444;text-align:center"
+    def flag_col(v):
+        s = str(v)
+        if s in ("✓", "ABOVE"): return "color:#00e676;font-weight:700;text-align:center"
+        if s in ("✗", "BELOW"): return "color:#ff4d6d;text-align:center"
+        return "color:#4a7090;text-align:center"
 
-    def ltp_200_color(val):
-        if str(val) == "ABOVE":
-            return "background-color:#001a00;color:#39ff14;font-weight:bold;text-align:center"
-        return "background-color:#2a0a0a;color:#ff4444;font-weight:bold;text-align:center"
-
-    def support_color(val):
-        if str(val) == "YES":
-            return "background-color:#001a3d;color:#00ffff;font-weight:bold;text-align:center"
-        return "color:#445555;text-align:center"
-
-    def pct_color(val):
+    def pct_col(v):
         try:
-            v = float(val)
-            if v > 10:
-                return "color:#39ff14;font-weight:bold"
-            elif v > 0:
-                return "color:#00cc00"
-            elif v > -10:
-                return "color:#ff8800"
-            else:
-                return "color:#ff4444"
-        except:
-            return ""
+            v = float(v)
+            if v > 10:   return "color:#00e676;font-weight:700"
+            elif v > 0:  return "color:#4ddb8a"
+            elif v > -10: return "color:#f5a623"
+            else:        return "color:#ff4d6d"
+        except: return ""
+
+    flag_cols = [c for c in ["EMA Aligned", "LTP vs 200EMA", "Near Support", "MACD Bull"] if c in df.columns]
+    pct_cols  = [c for c in ["% vs 200EMA", "% from 52W High"] if c in df.columns]
 
     try:
-        # pandas >= 2.1 uses .map instead of .applymap
-        styler = (
-            df.style
-            .map(rsi_color, subset=RSI_COLS)
-            .map(ema_align_color, subset=["EMA Aligned"])
-            .map(ltp_200_color, subset=["LTP > 200EMA"])
-            .map(support_color, subset=["Near Support"])
-            .map(pct_color, subset=["% vs 200EMA"])
-            .set_properties(**{"background-color": "#010f14", "color": "#c8e6f0", "border-color": "#00ffff15"})
-            .set_table_styles([
-                {"selector": "thead th", "props": [
-                    ("background-color", "#003d4d"),
-                    ("color", "#00ffff"),
-                    ("font-size", "0.72rem"),
-                    ("text-transform", "uppercase"),
-                    ("letter-spacing", "0.5px"),
-                    ("border-bottom", "2px solid #00ffff50"),
-                ]},
-                {"selector": "tbody tr:hover td", "props": [("background-color", "#00ffff10")]},
-            ])
-            .format(precision=2, na_rep="-")
-        )
+        styler = df.style.map(rsi_col, subset=RSI_COLS)
+        if flag_cols: styler = styler.map(flag_col, subset=flag_cols)
+        if pct_cols:  styler = styler.map(pct_col, subset=pct_cols)
     except TypeError:
-        # fallback for older pandas
-        styler = (
-            df.style
-            .applymap(rsi_color, subset=RSI_COLS)
-            .applymap(ema_align_color, subset=["EMA Aligned"])
-            .applymap(ltp_200_color, subset=["LTP > 200EMA"])
-            .applymap(support_color, subset=["Near Support"])
-            .applymap(pct_color, subset=["% vs 200EMA"])
-            .format(precision=2, na_rep="-")
-        )
+        styler = df.style.applymap(rsi_col, subset=RSI_COLS)
+
+    styler = styler.set_properties(**{
+        "background-color": "#0d1520",
+        "color": "#cde4f5",
+        "border-color": "#1e3a5f",
+        "font-family": "Space Mono, monospace",
+        "font-size": "0.75rem",
+    }).set_table_styles([
+        {"selector": "thead th", "props": [
+            ("background-color", "#111d2e"),
+            ("color", "#00d4ff"),
+            ("font-size", "0.68rem"),
+            ("text-transform", "uppercase"),
+            ("letter-spacing", "1px"),
+            ("border-bottom", "2px solid #1e3a5f"),
+            ("white-space", "nowrap"),
+        ]},
+        {"selector": "tbody tr:hover td", "props": [("background-color", "#00d4ff0d")]},
+    ]).format(precision=2, na_rep="–")
     return styler
 
-# ── BREADTH DISPLAY ──────────────────────────────────────────────────────────
+# ── PLOTLY CHART ──────────────────────────────────────────────────────────────
+def plot_stock(symbol: str, df: pd.DataFrame):
+    if not HAS_PLOTLY or df.empty:
+        st.warning("Plotly not available or no data.")
+        return
+
+    c = df["Close"]
+    e20_s, e50_s, e200_s = ema(c, 20), ema(c, 50), ema(c, 200)
+    macd_line, macd_sig, macd_hist = macd(c)
+    rsi14 = 100 - 100 / (1 + c.diff().clip(lower=0).ewm(com=13, min_periods=14).mean() /
+                          (-c.diff().clip(upper=0)).ewm(com=13, min_periods=14).mean().replace(0, np.nan))
+    bb_mid, bb_up, bb_lo = bollinger(c)
+    _, sup_level, sup_zones = nearest_support(df, 0.05)
+
+    # Use last 365 trading days
+    df_plot = df.iloc[-365:]
+    idx = df_plot.index
+
+    fig = make_subplots(
+        rows=3, cols=1,
+        shared_xaxes=True,
+        row_heights=[0.55, 0.25, 0.20],
+        vertical_spacing=0.03,
+        subplot_titles=("", "MACD", "RSI 14"),
+    )
+
+    # ── Candlestick ──
+    fig.add_trace(go.Candlestick(
+        x=idx, open=df_plot["Open"], high=df_plot["High"],
+        low=df_plot["Low"], close=df_plot["Close"],
+        increasing_line_color="#00e676", decreasing_line_color="#ff4d6d",
+        increasing_fillcolor="#00e67620", decreasing_fillcolor="#ff4d6d20",
+        name="Price", showlegend=False,
+    ), row=1, col=1)
+
+    # Bollinger bands
+    fig.add_trace(go.Scatter(x=idx, y=bb_up.reindex(idx), line=dict(color="#f5a62330", width=1),
+                              fill=None, name="BB Upper", showlegend=False), row=1, col=1)
+    fig.add_trace(go.Scatter(x=idx, y=bb_lo.reindex(idx), line=dict(color="#f5a62330", width=1),
+                              fill="tonexty", fillcolor="#f5a62308", name="BB Lower", showlegend=False), row=1, col=1)
+
+    # EMAs
+    for val, col, lbl in [(e20_s, "#00d4ff", "EMA 20"), (e50_s, "#f5a623", "EMA 50"), (e200_s, "#ff4d6d", "EMA 200")]:
+        fig.add_trace(go.Scatter(x=idx, y=val.reindex(idx), line=dict(color=col, width=1.5),
+                                  name=lbl, showlegend=True), row=1, col=1)
+
+    # Support zones (horizontal lines)
+    ltp = df["Close"].iloc[-1]
+    for z in sup_zones[-6:]:
+        if z < ltp * 1.1:
+            fig.add_hline(y=z, line=dict(color="#00d4ff40", width=1, dash="dot"),
+                          annotation_text=f"S {z:.0f}", annotation_font_size=9,
+                          annotation_font_color="#00d4ff80", row=1, col=1)
+
+    # Volume bars
+    colors = ["#00e67640" if df_plot["Close"].iloc[i] >= df_plot["Open"].iloc[i]
+              else "#ff4d6d40" for i in range(len(df_plot))]
+    fig.add_trace(go.Bar(x=idx, y=df_plot["Volume"], marker_color=colors,
+                          name="Volume", showlegend=False, yaxis="y2"), row=1, col=1)
+
+    # ── MACD ──
+    hist_colors = ["#00e676" if v >= 0 else "#ff4d6d" for v in macd_hist.reindex(idx).fillna(0)]
+    fig.add_trace(go.Bar(x=idx, y=macd_hist.reindex(idx), marker_color=hist_colors,
+                          name="MACD Hist", showlegend=False), row=2, col=1)
+    fig.add_trace(go.Scatter(x=idx, y=macd_line.reindex(idx), line=dict(color="#00d4ff", width=1.5),
+                              name="MACD", showlegend=False), row=2, col=1)
+    fig.add_trace(go.Scatter(x=idx, y=macd_sig.reindex(idx), line=dict(color="#f5a623", width=1.5),
+                              name="Signal", showlegend=False), row=2, col=1)
+
+    # ── RSI ──
+    fig.add_trace(go.Scatter(x=idx, y=rsi14.reindex(idx), line=dict(color="#7b8fff", width=1.5),
+                              name="RSI 14", showlegend=False), row=3, col=1)
+    fig.add_hline(y=70, line=dict(color="#ff4d6d40", dash="dash", width=1), row=3, col=1)
+    fig.add_hline(y=30, line=dict(color="#00e67640", dash="dash", width=1), row=3, col=1)
+    fig.add_hrect(y0=30, y1=70, fillcolor="#ffffff05", line_width=0, row=3, col=1)
+
+    fig.update_layout(
+        **PLOTLY_DARK,
+        title=dict(text=f"<b>{symbol}.NS</b>  ·  {df_plot['Close'].iloc[-1]:.2f}",
+                   font=dict(size=18, color="#00d4ff"), x=0.01),
+        height=720,
+        margin=dict(l=0, r=0, t=48, b=0),
+        xaxis_rangeslider_visible=False,
+        legend=dict(orientation="h", y=1.02, x=0.5, xanchor="center",
+                    font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
+        yaxis2=dict(overlaying="y", side="right", showgrid=False,
+                    showticklabels=False, range=[0, df_plot["Volume"].max() * 6]),
+    )
+    fig.update_xaxes(showspikes=True, spikecolor="#1e3a5f", spikethickness=1)
+    fig.update_yaxes(showspikes=True, spikecolor="#1e3a5f", spikethickness=1)
+
+    st.plotly_chart(fig, use_container_width=True)
+
+# ── PORTFOLIO OPTIMIZER ───────────────────────────────────────────────────────
+def show_portfolio_tab(df_results: pd.DataFrame):
+    st.markdown("## Portfolio Optimizer")
+    if not HAS_PYPFOPT:
+        st.error("pyportfolioopt not installed.")
+        return
+    if df_results.empty:
+        st.info("Run a scan first to populate candidates.")
+        return
+
+    symbols = df_results["Symbol"].tolist()
+    st.markdown(f"<p style='color:var(--muted);font-size:0.78rem;'>Select symbols from scan results ({len(symbols)} available)</p>", unsafe_allow_html=True)
+
+    selected = st.multiselect("Symbols for portfolio", symbols, default=symbols[:min(12, len(symbols))])
+    if len(selected) < 3:
+        st.warning("Select at least 3 symbols.")
+        return
+
+    opt_method = st.radio("Optimization target", ["Max Sharpe Ratio", "Min Volatility", "Max Quadratic Utility"], horizontal=True)
+
+    if st.button("◈ OPTIMIZE"):
+        with st.spinner("Fetching price data..."):
+            prices = fetch_close_matrix(selected)
+
+        if prices.empty or len(prices.columns) < 3:
+            st.error("Not enough price data. Try different symbols.")
+            return
+
+        try:
+            mu = expected_returns.mean_historical_return(prices)
+            S  = risk_models.sample_cov(prices)
+            ef = EfficientFrontier(mu, S, weight_bounds=(0.01, 0.40))
+
+            if opt_method == "Max Sharpe Ratio":
+                ef.max_sharpe(risk_free_rate=0.065)
+            elif opt_method == "Min Volatility":
+                ef.min_volatility()
+            else:
+                ef.max_quadratic_utility(risk_aversion=2)
+
+            weights = ef.clean_weights()
+            perf    = ef.portfolio_performance(risk_free_rate=0.065)
+
+            # ── Metrics ──
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Expected Return", f"{perf[0]*100:.1f}%")
+            c2.metric("Volatility",      f"{perf[1]*100:.1f}%")
+            c3.metric("Sharpe Ratio",    f"{perf[2]:.2f}")
+
+            # ── Weights table ──
+            wdf = pd.DataFrame.from_dict(weights, orient="index", columns=["Weight"])
+            wdf = wdf[wdf["Weight"] > 0.001].sort_values("Weight", ascending=False)
+            wdf["Weight %"] = (wdf["Weight"] * 100).round(2)
+            wdf = wdf.drop(columns="Weight").reset_index().rename(columns={"index": "Symbol"})
+
+            if HAS_PLOTLY:
+                fig = go.Figure(go.Bar(
+                    x=wdf["Symbol"], y=wdf["Weight %"],
+                    marker=dict(color=wdf["Weight %"],
+                                colorscale=[[0, "#1e3a5f"], [0.5, "#00d4ff"], [1, "#f5a623"]],
+                                showscale=False),
+                    text=wdf["Weight %"].apply(lambda x: f"{x:.1f}%"),
+                    textposition="outside", textfont=dict(color="#cde4f5", size=10),
+                ))
+                fig.update_layout(**PLOTLY_DARK, height=320,
+                                  margin=dict(l=0, r=0, t=16, b=0),
+                                  yaxis_title="Weight %", xaxis_title="")
+                st.plotly_chart(fig, use_container_width=True)
+
+            st.dataframe(
+                wdf.style.format({"Weight %": "{:.2f}"})
+                   .set_properties(**{"background-color": "#0d1520", "color": "#cde4f5"}),
+                use_container_width=True, height=280
+            )
+
+            csv = wdf.to_csv(index=False).encode()
+            st.download_button("↓ EXPORT WEIGHTS", csv,
+                               f"portfolio_{datetime.now().strftime('%Y%m%d_%H%M')}.csv", "text/csv")
+
+        except Exception as e:
+            st.error(f"Optimization failed: {e}")
+
+# ── CLUSTER ANALYSIS ──────────────────────────────────────────────────────────
+def show_cluster_tab(df_results: pd.DataFrame):
+    st.markdown("## RSI Momentum Clusters")
+    if not HAS_SKLEARN:
+        st.error("scikit-learn not installed.")
+        return
+    if df_results.empty or len(df_results) < 6:
+        st.info("Run a scan with at least 6 stocks first.")
+        return
+
+    rsi_cols = [c for c in ["RSI 14", "RSI 21", "RSI 63", "RSI 126", "RSI 252"] if c in df_results.columns]
+    feat_df = df_results[["Symbol"] + rsi_cols + ["% vs 200EMA", "ATR %"]].dropna()
+
+    if len(feat_df) < 6:
+        st.info("Not enough complete data for clustering.")
+        return
+
+    n_clusters = st.slider("Number of clusters", 2, 6, 4)
+
+    X = feat_df[rsi_cols + ["% vs 200EMA", "ATR %"]].values
+    X_scaled = StandardScaler().fit_transform(X)
+    km = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    feat_df = feat_df.copy()
+    feat_df["Cluster"] = km.fit_predict(X_scaled)
+
+    # Label clusters by avg RSI14
+    cluster_rsi = feat_df.groupby("Cluster")["RSI 14"].mean().sort_values(ascending=False)
+    labels = {
+        0: "🔥 Strong Momentum",
+        1: "📈 Building Up",
+        2: "⚖️ Neutral",
+        3: "📉 Weakening",
+        4: "💧 Oversold",
+        5: "❄️ Deep Bear",
+    }
+    rank_map = {cid: i for i, cid in enumerate(cluster_rsi.index)}
+    feat_df["Group"] = feat_df["Cluster"].map(lambda c: labels.get(rank_map[c], f"Cluster {rank_map[c]}"))
+
+    if HAS_PLOTLY:
+        fig = px.scatter(
+            feat_df, x="RSI 14", y="% vs 200EMA",
+            color="Group", hover_name="Symbol",
+            size="ATR %", size_max=18,
+            color_discrete_sequence=["#00e676", "#00d4ff", "#f5a623", "#ff4d6d", "#7b8fff", "#ff6ec7"],
+        )
+        fig.update_layout(
+            **PLOTLY_DARK, height=480,
+            margin=dict(l=0, r=0, t=16, b=0),
+            xaxis_title="RSI 14", yaxis_title="% vs 200 EMA",
+            legend=dict(orientation="v", x=1.01, y=0.5),
+        )
+        fig.add_vline(x=50, line=dict(color="#1e3a5f", dash="dash"))
+        fig.add_hline(y=0,  line=dict(color="#1e3a5f", dash="dash"))
+        st.plotly_chart(fig, use_container_width=True)
+
+    for grp_name, grp_df in feat_df.groupby("Group"):
+        with st.expander(f"{grp_name}  ({len(grp_df)} stocks)"):
+            show_cols = ["Symbol", "RSI 14", "RSI 63", "% vs 200EMA", "ATR %"]
+            st.dataframe(
+                grp_df[show_cols].sort_values("RSI 14", ascending=False)
+                   .style.format(precision=1)
+                   .set_properties(**{"background-color": "#0d1520", "color": "#cde4f5",
+                                      "font-size": "0.75rem"}),
+                use_container_width=True, hide_index=True,
+            )
+
+# ── BREADTH ───────────────────────────────────────────────────────────────────
 def show_breadth(df: pd.DataFrame):
-    st.markdown("## 📊 Market Breadth")
+    st.markdown("## Market Breadth")
     n = len(df)
     if n == 0:
         return
 
-    above_200      = (df["LTP > 200EMA"] == "ABOVE").sum()
-    ema_aligned    = (df["EMA Aligned"] == "YES").sum()
-    near_support   = (df["Near Support"] == "YES").sum()
-    rsi14_bull     = (df["RSI 14"] > 50).sum()
-    rsi14_bear     = (df["RSI 14"] < 50).sum()
-    rsi14_overbuy  = (df["RSI 14"] > 70).sum()
-    rsi14_oversold = (df["RSI 14"] < 30).sum()
-    all_rsi_bull   = ((df["RSI 14"] > 50) & (df["RSI 21"] > 50) & (df["RSI 63"] > 50)).sum()
+    above200   = (df["LTP vs 200EMA"] == "ABOVE").sum()
+    aligned    = (df["EMA Aligned"]   == "✓").sum()
+    near_sup   = (df["Near Support"]  == "✓").sum()
+    macd_bull  = (df.get("MACD Bull", pd.Series()) == "✓").sum()
+    r14_bull   = (df["RSI 14"] > 50).sum()
+    r14_ob     = (df["RSI 14"] > 70).sum()
+    r14_os     = (df["RSI 14"] < 30).sum()
 
-    def pct(x): return f"{x} ({int(100*x/n)}%)"
+    def p(x): return f"{x}  ({int(100*x/n)}%)"
 
     cols = st.columns(4)
-    cols[0].metric("🔵 Total Scanned",    str(n))
-    cols[1].metric("🟢 Above 200 EMA",    pct(above_200))
-    cols[2].metric("⚡ EMA Aligned",      pct(ema_aligned))
-    cols[3].metric("🎯 Near Support",     str(near_support))
+    cols[0].metric("Scanned",          str(n))
+    cols[1].metric("Above 200 EMA",    p(above200))
+    cols[2].metric("EMA Aligned",      p(aligned))
+    cols[3].metric("Near Support",     str(near_sup))
 
     cols2 = st.columns(4)
-    cols2[0].metric("📈 RSI14 Bullish",   pct(rsi14_bull))
-    cols2[1].metric("📉 RSI14 Bearish",   pct(rsi14_bear))
-    cols2[2].metric("🔥 RSI14 Overbought",pct(rsi14_overbuy))
-    cols2[3].metric("💧 RSI14 Oversold",  pct(rsi14_oversold))
+    cols2[0].metric("RSI14 Bullish",   p(r14_bull))
+    cols2[1].metric("RSI14 Overbought",p(r14_ob))
+    cols2[2].metric("RSI14 Oversold",  p(r14_os))
+    cols2[3].metric("MACD Bullish",    p(macd_bull) if macd_bull > 0 else "–")
 
-    cols3 = st.columns(4)
-    cols3[0].metric("✅ All RSI>50 (14/21/63)", pct(all_rsi_bull))
-    pct_above = int(100 * above_200 / n)
-    breadth_status = "🟢 BULLISH" if pct_above > 60 else ("🔴 BEARISH" if pct_above < 40 else "🟡 NEUTRAL")
-    cols3[1].metric("📊 Overall Breadth", breadth_status)
-    avg_rsi14 = df["RSI 14"].mean()
-    cols3[2].metric("📉 Avg RSI14", f"{avg_rsi14:.1f}")
-    avg_rsi63 = df["RSI 63"].mean()
-    cols3[3].metric("📉 Avg RSI63", f"{avg_rsi63:.1f}")
+    pct_above = int(100 * above200 / n)
+    breadth   = "BULLISH" if pct_above > 60 else ("BEARISH" if pct_above < 40 else "NEUTRAL")
+    color     = "#00e676" if breadth == "BULLISH" else ("#ff4d6d" if breadth == "BEARISH" else "#f5a623")
+    avg14, avg63 = df["RSI 14"].mean(), df["RSI 63"].mean()
 
-    st.divider()
+    st.markdown(f"""
+    <div style='display:flex;gap:16px;flex-wrap:wrap;margin:12px 0;'>
+        <div style='background:#0d1520;border:1px solid {color}40;border-left:3px solid {color};
+                    padding:12px 20px;border-radius:2px;'>
+            <div style='color:{color};font-family:Syne,sans-serif;font-weight:700;font-size:1.2rem;'>
+                {breadth}
+            </div>
+            <div style='color:#4a7090;font-size:0.65rem;letter-spacing:1px;margin-top:2px;'>OVERALL BREADTH</div>
+        </div>
+        <div style='background:#0d1520;border:1px solid #1e3a5f;padding:12px 20px;border-radius:2px;'>
+            <div style='color:#00d4ff;font-family:Syne,sans-serif;font-weight:700;font-size:1.2rem;'>{avg14:.1f}</div>
+            <div style='color:#4a7090;font-size:0.65rem;letter-spacing:1px;margin-top:2px;'>AVG RSI 14</div>
+        </div>
+        <div style='background:#0d1520;border:1px solid #1e3a5f;padding:12px 20px;border-radius:2px;'>
+            <div style='color:#f5a623;font-family:Syne,sans-serif;font-weight:700;font-size:1.2rem;'>{avg63:.1f}</div>
+            <div style='color:#4a7090;font-size:0.65rem;letter-spacing:1px;margin-top:2px;'>AVG RSI 63</div>
+        </div>
+        <div style='background:#0d1520;border:1px solid #1e3a5f;padding:12px 20px;border-radius:2px;'>
+            <div style='color:#cde4f5;font-family:Syne,sans-serif;font-weight:700;font-size:1.2rem;'>{pct_above}%</div>
+            <div style='color:#4a7090;font-size:0.65rem;letter-spacing:1px;margin-top:2px;'>ABOVE 200 EMA</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # RSI distribution bar chart
+    if HAS_PLOTLY:
+        bins  = [0, 20, 30, 40, 50, 60, 70, 80, 100]
+        labs  = ["<20", "20-30", "30-40", "40-50", "50-60", "60-70", "70-80", ">80"]
+        cnts  = pd.cut(df["RSI 14"].dropna(), bins=bins, labels=labs).value_counts().reindex(labs, fill_value=0)
+        cols_bar = ["#ff4d6d", "#ff4d6d", "#f5a623", "#f5a623", "#4ddb8a", "#4ddb8a", "#00e676", "#00e676"]
+        fig = go.Figure(go.Bar(x=cnts.index, y=cnts.values, marker_color=cols_bar,
+                                text=cnts.values, textposition="outside",
+                                textfont=dict(color="#cde4f5", size=11)))
+        fig.update_layout(**PLOTLY_DARK, height=260, margin=dict(l=0, r=0, t=8, b=0),
+                          title=dict(text="RSI 14 Distribution", font=dict(size=13, color="#4a7090")),
+                          xaxis_title="RSI Range", yaxis_title="# Stocks",
+                          bargap=0.25)
+        st.plotly_chart(fig, use_container_width=True)
 
 # ── SECTOR BREAKDOWN ──────────────────────────────────────────────────────────
 def show_sector_breakdown(df: pd.DataFrame):
-    st.markdown("## 🏭 Sector Breakdown")
-    if "Sector" not in df.columns:
+    st.markdown("## Sector Breakdown")
+    if "Sector" not in df.columns or df.empty:
         return
 
     sec = df.groupby("Sector").agg(
-        Count          = ("Symbol", "count"),
-        Avg_RSI14      = ("RSI 14", "mean"),
-        Avg_RSI63      = ("RSI 63", "mean"),
-        Above_200EMA   = ("LTP > 200EMA", lambda x: (x == "ABOVE").sum()),
-        EMA_Aligned    = ("EMA Aligned", lambda x: (x == "YES").sum()),
-        Near_Support   = ("Near Support", lambda x: (x == "YES").sum()),
-        Avg_LTP        = ("LTP", "mean"),
+        Count=("Symbol", "count"),
+        Avg_RSI14=("RSI 14", "mean"),
+        Avg_RSI63=("RSI 63", "mean"),
+        Above_200=("LTP vs 200EMA", lambda x: (x == "ABOVE").sum()),
+        EMA_Aligned=("EMA Aligned", lambda x: (x == "✓").sum()),
+        Near_Sup=("Near Support", lambda x: (x == "✓").sum()),
     ).round(1).reset_index()
 
-    sec["% Above 200EMA"] = (sec["Above_200EMA"] / sec["Count"] * 100).round(1)
-    sec["% EMA Aligned"]  = (sec["EMA_Aligned"]  / sec["Count"] * 100).round(1)
+    sec["% Above200"] = (sec["Above_200"] / sec["Count"] * 100).round(1)
+    sec["% Aligned"]  = (sec["EMA_Aligned"] / sec["Count"] * 100).round(1)
     sec = sec.sort_values("Count", ascending=False)
 
-    def color_pct(val):
+    if HAS_PLOTLY:
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=sec["Sector"], y=sec["% Above200"],
+            name="% Above 200EMA",
+            marker_color="#00d4ff",
+            text=sec["% Above200"].apply(lambda x: f"{x:.0f}%"),
+            textposition="outside", textfont=dict(size=10, color="#cde4f5"),
+        ))
+        fig.add_trace(go.Scatter(
+            x=sec["Sector"], y=sec["Avg_RSI14"],
+            name="Avg RSI14", yaxis="y2",
+            line=dict(color="#f5a623", width=2),
+            mode="lines+markers", marker=dict(size=6),
+        ))
+        fig.add_hline(y=50, line=dict(color="#1e3a5f", dash="dash"), yref="y")
+        fig.update_layout(
+            **PLOTLY_DARK, height=360, margin=dict(l=0, r=0, t=16, b=0),
+            yaxis=dict(title="% Above 200EMA", range=[0, 110]),
+            yaxis2=dict(title="Avg RSI 14", overlaying="y", side="right", range=[20, 80]),
+            legend=dict(orientation="h", y=1.05),
+            bargap=0.3,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    disp = sec[["Sector", "Count", "Avg_RSI14", "Avg_RSI63", "% Above200", "% Aligned", "Near_Sup"]]
+
+    def pct_color(v):
         try:
-            v = float(val)
-            if v >= 60: return "color:#39ff14;font-weight:bold"
-            elif v >= 40: return "color:#ffaa00"
-            else: return "color:#ff4444"
+            v = float(v)
+            if v >= 60: return "color:#00e676;font-weight:700"
+            elif v >= 40: return "color:#f5a623"
+            else: return "color:#ff4d6d"
         except: return ""
 
     try:
-        styled_sec = (
-            sec.style
-            .map(color_pct, subset=["% Above 200EMA", "% EMA Aligned"])
-            .format(precision=1, na_rep="-")
-            .set_properties(**{"background-color": "#010f14", "color": "#c8e6f0"})
-        )
+        styled = disp.style.map(pct_color, subset=["% Above200", "% Aligned"])
     except TypeError:
-        styled_sec = sec.style.applymap(color_pct, subset=["% Above 200EMA", "% EMA Aligned"]).format(precision=1, na_rep="-")
+        styled = disp.style.applymap(pct_color, subset=["% Above200", "% Aligned"])
 
-    st.dataframe(styled_sec, use_container_width=True)
-    st.divider()
+    styled = styled.format(precision=1).set_properties(**{
+        "background-color": "#0d1520", "color": "#cde4f5",
+        "font-size": "0.75rem", "font-family": "Space Mono, monospace",
+    })
+    st.dataframe(styled, use_container_width=True, hide_index=True)
 
-# ── HEADER ──────────────────────────────────────────────────────────────────
+# ── HEADER ────────────────────────────────────────────────────────────────────
 def draw_header():
-    st.markdown("""
-    <div style="text-align:center;padding:30px 0 10px 0;">
-        <h1 style="font-size:2.6rem;letter-spacing:5px;margin-bottom:4px;">
-            ⚡ NSE STOCK SCANNER PRO ⚡
-        </h1>
-        <p style="color:#00ffff80;font-family:'Share Tech Mono',monospace;font-size:0.9rem;letter-spacing:3px;margin:0;">
-            NIFTY TOTAL MARKET  ·  SUPPORT ZONES 2020–2022  ·  EMA  ·  RSI  ·  BREADTH
-        </p>
-        <div style="margin-top:12px;display:flex;justify-content:center;gap:20px;flex-wrap:wrap;">
-            <span style="background:#001c25;border:1px solid #00ffff30;border-radius:4px;padding:4px 12px;color:#00ffff;font-size:0.75rem;font-family:'Share Tech Mono'">📡 LIVE DATA</span>
-            <span style="background:#001c25;border:1px solid #39ff1430;border-radius:4px;padding:4px 12px;color:#39ff14;font-size:0.75rem;font-family:'Share Tech Mono'">🇮🇳 NSE INDIA</span>
-            <span style="background:#001c25;border:1px solid #ff6ec730;border-radius:4px;padding:4px 12px;color:#ff6ec7;font-size:0.75rem;font-family:'Share Tech Mono'">⚙️ POWERED BY YFINANCE</span>
+    now = datetime.now().strftime("%d %b %Y  %H:%M")
+    st.markdown(f"""
+    <div style='padding:28px 0 8px 0;'>
+        <h1>AlphaMomentum</h1>
+        <div style='display:flex;align-items:center;gap:16px;margin-top:8px;flex-wrap:wrap;'>
+            <span style='color:#4a7090;font-family:Space Mono,monospace;font-size:0.72rem;letter-spacing:2px;'>
+                NSE TOTAL MARKET  ·  SCANNER + CHARTS + OPTIMIZER + CLUSTERS
+            </span>
+            <span style='margin-left:auto;color:#1e3a5f;font-size:0.68rem;font-family:Space Mono,monospace;'>{now} UTC</span>
+        </div>
+        <div style='display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;'>
+            <span style='background:#0d1520;border:1px solid #1e3a5f;padding:3px 10px;color:#00d4ff;font-size:0.65rem;font-family:Space Mono,monospace;letter-spacing:1px;'>● LIVE</span>
+            <span style='background:#0d1520;border:1px solid #1e3a5f;padding:3px 10px;color:#4a7090;font-size:0.65rem;font-family:Space Mono,monospace;letter-spacing:1px;'>yfinance</span>
+            <span style='background:#0d1520;border:1px solid #1e3a5f;padding:3px 10px;color:#4a7090;font-size:0.65rem;font-family:Space Mono,monospace;letter-spacing:1px;'>scipy  |  sklearn  |  pypfopt</span>
         </div>
     </div>
+    <div style='height:1px;background:linear-gradient(90deg,#00d4ff,#1e3a5f,transparent);margin:16px 0 24px 0;'></div>
     """, unsafe_allow_html=True)
-    st.divider()
 
-# ── IDLE SCREEN ───────────────────────────────────────────────────────────────
+# ── IDLE ──────────────────────────────────────────────────────────────────────
 def draw_idle():
     st.markdown("""
-    <div style="text-align:center;padding:80px 0;opacity:0.55;">
-        <div style="font-size:4rem;margin-bottom:20px;">📡</div>
-        <p style="color:#00ffff;font-family:'Orbitron',monospace;font-size:1.1rem;letter-spacing:3px;">
-            AWAITING SCAN COMMAND
+    <div style='text-align:center;padding:60px 0;'>
+        <div style='font-family:Syne,sans-serif;font-size:3rem;font-weight:800;
+                    color:#1e3a5f;letter-spacing:-2px;margin-bottom:16px;'>◈</div>
+        <p style='color:#4a7090;font-family:Space Mono,monospace;font-size:0.78rem;
+                  letter-spacing:3px;text-transform:uppercase;'>Awaiting scan command</p>
+        <p style='color:#1e3a5f;font-size:0.72rem;font-family:Space Mono,monospace;margin-top:8px;'>
+            Configure filters → click START SCANNING
         </p>
-        <p style="color:#a0d8df;font-family:'Share Tech Mono',monospace;font-size:0.85rem;">
-            Configure filters in the sidebar → click <strong>START SCANNING</strong>
-        </p>
-        <div style="margin-top:30px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px;max-width:700px;margin-left:auto;margin-right:auto;">
-            <div style="background:#011c22;border:1px solid #00ffff20;border-radius:8px;padding:16px;">
-                <div style="color:#00ffff;font-size:1.4rem;">🎯</div>
-                <p style="color:#a0d8df;font-size:0.78rem;margin-top:6px;">Support Zones from<br>2020–2022 Monthly Data</p>
-            </div>
-            <div style="background:#011c22;border:1px solid #39ff1420;border-radius:8px;padding:16px;">
-                <div style="color:#39ff14;font-size:1.4rem;">📈</div>
-                <p style="color:#a0d8df;font-size:0.78rem;margin-top:6px;">EMA 20/50/200<br>Alignment Check</p>
-            </div>
-            <div style="background:#011c22;border:1px solid #ff6ec720;border-radius:8px;padding:16px;">
-                <div style="color:#ff6ec7;font-size:1.4rem;">🌊</div>
-                <p style="color:#a0d8df;font-size:0.78rem;margin-top:6px;">RSI 14/21/63/126/252<br>Multi-Timeframe</p>
-            </div>
+        <div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+                    gap:12px;max-width:800px;margin:32px auto 0;'>
+            {''.join(f"""
+            <div style='background:#0d1520;border:1px solid #1e3a5f;border-top:2px solid {c};
+                        padding:16px;border-radius:2px;text-align:left;'>
+                <div style='color:{c};font-size:1.2rem;margin-bottom:8px;'>{icon}</div>
+                <div style='color:#4a7090;font-size:0.68rem;font-family:Space Mono,monospace;
+                            text-transform:uppercase;letter-spacing:1px;'>{lbl}</div>
+            </div>""" for icon, lbl, c in [
+                ("◈", "EMA 20/50/200 Alignment", "#00d4ff"),
+                ("◎", "Multi-TF RSI 14–252", "#7b8fff"),
+                ("◇", "scipy Support Zones", "#f5a623"),
+                ("◉", "Portfolio Optimizer", "#00e676"),
+                ("◐", "RSI Cluster Analysis", "#ff6ec7"),
+                ("◑", "Sector Breadth Heatmap", "#ff4d6d"),
+            ])}
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-# ── MAIN ─────────────────────────────────────────────────────────────────────
+# ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
     draw_header()
 
-    # ── SIDEBAR ──
+    # ── Sidebar ──
     with st.sidebar:
-        st.markdown("### ⚙️ SCANNER CONFIG")
-        st.markdown("---")
+        st.markdown("### ◈ SCANNER CONFIG")
+        st.markdown('<hr style="border-color:#1e3a5f;margin:8px 0 16px 0;">', unsafe_allow_html=True)
 
-        max_stocks = st.slider("Max Stocks to Scan", 10, 200, 30, 10,
-            help="Larger values take longer. Start with 30 to test.")
-        support_threshold = st.slider("Support Proximity %", 1, 10, 3, 1,
-            help="How close LTP must be to 2020–22 monthly lows to flag as 'Near Support'.")
-        threshold_pct = support_threshold / 100
+        max_stocks = st.slider("Max Stocks", 10, 200, 40, 10)
+        support_pct = st.slider("Support Proximity %", 1, 15, 5, 1)
+        threshold_pct = support_pct / 100
 
-        st.markdown("---")
-        st.markdown("### 🔍 FILTERS")
-        filter_near_support = st.checkbox("Near Support Only",  False)
-        filter_ema_aligned  = st.checkbox("EMA Aligned Only",   False)
-        filter_above_200    = st.checkbox("Above 200 EMA Only", False)
-        filter_rsi14_bull   = st.checkbox("RSI14 > 50 Only",    False)
+        st.markdown('<hr style="border-color:#1e3a5f;margin:16px 0;">', unsafe_allow_html=True)
+        st.markdown("### ◎ FILTERS")
+        f_support = st.checkbox("Near Support Only",   False)
+        f_aligned = st.checkbox("EMA Aligned Only",    False)
+        f_above   = st.checkbox("Above 200 EMA Only",  False)
+        f_rsi     = st.checkbox("RSI14 > 50 Only",     False)
+        f_macd    = st.checkbox("MACD Bullish Only",   False)
 
-        st.markdown("---")
-        st.markdown("### 📊 SORT BY")
-        sort_col = st.selectbox("Column", ["RSI 14", "LTP", "% vs 200EMA", "RSI 63", "Symbol"])
+        st.markdown('<hr style="border-color:#1e3a5f;margin:16px 0;">', unsafe_allow_html=True)
+        st.markdown("### ◇ SORT")
+        sort_col = st.selectbox("By", ["RSI 14", "% vs 200EMA", "% from 52W High",
+                                        "Vol Ratio", "ATR %", "BB %", "LTP", "Symbol"])
         sort_asc = st.checkbox("Ascending", False)
 
-        st.markdown("---")
-        st.markdown("""
-        <div style='color:#445555;font-size:0.72rem;font-family:Share Tech Mono,monospace;line-height:1.8;'>
-        🟢 RSI > 70  Overbought<br>
-        🟡 RSI > 50  Bullish<br>
-        🟠 RSI < 50  Bearish<br>
-        🔴 RSI < 30  Oversold<br>
-        ─────────────────────<br>
-        ⚡ Near Support = within {threshold}% of<br>
-        monthly lows (2020–22)
+        st.markdown('<hr style="border-color:#1e3a5f;margin:16px 0;">', unsafe_allow_html=True)
+        st.markdown(f"""
+        <div style='color:#1e3a5f;font-size:0.65rem;font-family:Space Mono,monospace;line-height:2;'>
+        RSI ≥70  Overbought<br>RSI 50-70  Bullish<br>
+        RSI 30-50  Bearish<br>RSI ≤30  Oversold<br>
+        ──────────────────<br>
+        Support = within {support_pct}% of<br>scipy local minima
         </div>
-        """.format(threshold=support_threshold), unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
-    # ── LOAD STOCKS ──
-    with st.spinner("🔄 Loading Nifty Total Market index..."):
-        result = fetch_stock_list()
-        if isinstance(result, tuple):
-            stocks_df, err = result
-        else:
-            stocks_df = result
-            err = None
+    # ── Load stock list ──
+    with st.spinner("Loading Nifty Total Market..."):
+        stocks_df = fetch_stock_list()
 
-    if stocks_df is None or (isinstance(stocks_df, pd.DataFrame) and stocks_df.empty):
-        st.error(f"❌ Could not load stock list. Error: {err}")
-        st.info("ℹ️ niftyindices.com may block direct requests. Using a fallback sample list.")
-        # Minimal fallback
+    if stocks_df.empty:
+        st.warning("Using fallback stock list (niftyindices.com unreachable).")
         stocks_df = pd.DataFrame({
-            "Symbol": ["RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK","HINDUNILVR","SBIN","BHARTIARTL","ITC","KOTAKBANK",
-                       "WIPRO","LTIM","AXISBANK","MARUTI","SUNPHARMA","TITAN","NESTLEIND","POWERGRID","NTPC","ULTRACEMCO"],
-            "Industry": ["ENERGY","IT","FINANCIALS","IT","FINANCIALS","FMCG","FINANCIALS","TELECOM","FMCG","FINANCIALS",
-                         "IT","IT","FINANCIALS","AUTO","PHARMA","CONSUMER","FMCG","UTILITIES","UTILITIES","CEMENT"],
+            "Symbol": ["RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK","HINDUNILVR","SBIN",
+                       "BHARTIARTL","ITC","KOTAKBANK","WIPRO","AXISBANK","MARUTI","SUNPHARMA",
+                       "TITAN","NESTLEIND","POWERGRID","NTPC","ULTRACEMCO","BAJFINANCE",
+                       "ASIANPAINT","HCLTECH","TECHM","DIVISLAB","DRREDDY","CIPLA","ADANIENT",
+                       "ADANIPORTS","TATAMOTORS","TATASTEEL"],
+            "Industry": ["ENERGY","IT","FINANCIALS","IT","FINANCIALS","FMCG","FINANCIALS",
+                         "TELECOM","FMCG","FINANCIALS","IT","FINANCIALS","AUTO","PHARMA",
+                         "CONSUMER","FMCG","UTILITIES","UTILITIES","CEMENT","FINANCIALS",
+                         "PAINTS","IT","IT","PHARMA","PHARMA","PHARMA","INFRA",
+                         "INFRA","AUTO","METALS"],
         })
-        st.warning(f"Using fallback list of {len(stocks_df)} stocks.")
     else:
-        st.success(f"✅ {len(stocks_df)} stocks loaded from Nifty Total Market")
+        st.success(f"✓  {len(stocks_df)} stocks loaded", icon="◈")
 
-    # Identify columns
     cols_lower = {c.lower(): c for c in stocks_df.columns}
-    sym_col = next((cols_lower[k] for k in ["symbol", "sym"] if k in cols_lower), stocks_df.columns[0])
-    sec_col = next((cols_lower[k] for k in ["industry", "sector", "ind"] if k in cols_lower), None)
+    sym_col = next((cols_lower[k] for k in ["symbol","sym"] if k in cols_lower), stocks_df.columns[0])
+    sec_col = next((cols_lower[k] for k in ["industry","sector","ind"] if k in cols_lower), None)
 
-    # Sector quick-filter (sidebar)
     if sec_col:
-        all_sectors = sorted(stocks_df[sec_col].dropna().astype(str).unique().tolist())
+        all_sectors = sorted(stocks_df[sec_col].dropna().astype(str).unique())
         with st.sidebar:
-            st.markdown("### 🏭 SECTOR FILTER")
-            sector_sel = st.multiselect("Sectors (blank = all)", all_sectors)
+            st.markdown('<hr style="border-color:#1e3a5f;margin:16px 0;">', unsafe_allow_html=True)
+            st.markdown("### ◉ SECTOR")
+            sector_sel = st.multiselect("Filter sectors (blank = all)", all_sectors)
         if sector_sel:
             stocks_df = stocks_df[stocks_df[sec_col].astype(str).isin(sector_sel)]
-    else:
-        sector_sel = []
 
     stocks_df = stocks_df.head(max_stocks)
 
-    # ── SCAN BUTTON ──
-    col_l, col_c, col_r = st.columns([1.5, 2, 1.5])
-    with col_c:
-        scan_btn = st.button("🚀  START SCANNING", use_container_width=True)
+    # ── Scan button ──
+    c1, c2, c3 = st.columns([1.5, 2, 1.5])
+    with c2:
+        scan_btn = st.button("◈  START SCANNING", use_container_width=True)
 
-    if not scan_btn:
+    # ── Session state for results ──
+    if "scan_results" not in st.session_state:
+        st.session_state.scan_results = pd.DataFrame()
+
+    if not scan_btn and st.session_state.scan_results.empty:
         draw_idle()
         return
 
-    # ── SCANNING ──
-    st.markdown(f"""
-    <p style="color:#00ffff80;font-family:'Share Tech Mono',monospace;font-size:0.85rem;text-align:center;margin:8px 0;">
-        Scanning {len(stocks_df)} stocks · Support proximity: {support_threshold}% · Data from yfinance (NSE)
-    </p>
-    """, unsafe_allow_html=True)
+    # ── Execute scan ──
+    if scan_btn:
+        st.markdown(f"<p style='color:#4a7090;font-size:0.72rem;text-align:center;letter-spacing:1px;'>"
+                    f"Scanning {len(stocks_df)} stocks  ·  Support proximity {support_pct}%</p>",
+                    unsafe_allow_html=True)
 
-    prog_bar  = st.progress(0)
-    status_ph = st.empty()
-    results   = []
-    errors    = 0
-    total     = len(stocks_df)
+        prog  = st.progress(0)
+        status = st.empty()
+        results, errors = [], 0
+        total = len(stocks_df)
 
-    for i, (_, row) in enumerate(stocks_df.iterrows()):
-        symbol = str(row[sym_col]).strip().upper()
-        sector = str(row[sec_col]).strip() if sec_col else "N/A"
+        for i, (_, row) in enumerate(stocks_df.iterrows()):
+            sym = str(row[sym_col]).strip().upper()
+            sec = str(row[sec_col]).strip() if sec_col else "N/A"
+            status.markdown(
+                f"<p style='color:#1e3a5f;font-family:Space Mono,monospace;font-size:0.72rem;"
+                f"text-align:center;'>[{i+1}/{total}]  {sym}  —  {sec}</p>",
+                unsafe_allow_html=True)
+            try:
+                res = scan_stock(sym, sec, threshold_pct)
+                if res: results.append(res)
+                else:   errors += 1
+            except Exception:
+                errors += 1
+            prog.progress((i + 1) / total)
 
-        status_ph.markdown(
-            f"<p style='color:#00ffff80;font-family:Share Tech Mono,monospace;font-size:0.8rem;text-align:center;'>"
-            f"[{i+1}/{total}] ⚡ Scanning <strong style='color:#00ffff'>{symbol}</strong> — {sector}</p>",
+        prog.empty()
+        status.empty()
+
+        if not results:
+            st.error("No results. Check internet connection.")
+            return
+
+        st.session_state.scan_results = pd.DataFrame(results)
+        if errors:
+            st.info(f"ℹ  {errors} symbols skipped (no data / delisted / insufficient history)")
+
+    df_res = st.session_state.scan_results
+
+    # ── Filters ──
+    df_f = df_res.copy()
+    if f_support: df_f = df_f[df_f["Near Support"]  == "✓"]
+    if f_aligned: df_f = df_f[df_f["EMA Aligned"]   == "✓"]
+    if f_above:   df_f = df_f[df_f["LTP vs 200EMA"] == "ABOVE"]
+    if f_rsi:     df_f = df_f[df_f["RSI 14"] > 50]
+    if f_macd:    df_f = df_f[df_f.get("MACD Bull", pd.Series()) == "✓"]
+    if sort_col in df_f.columns:
+        df_f = df_f.sort_values(sort_col, ascending=sort_asc)
+
+    # ── TABS ──
+    t1, t2, t3, t4, t5 = st.tabs([
+        "◈  SCANNER", "◎  CHART", "◉  PORTFOLIO", "◐  CLUSTERS", "◑  SECTORS"
+    ])
+
+    # ── TAB 1: Scanner ──
+    with t1:
+        show_breadth(df_res)
+        st.markdown(
+            f"## Results  "
+            f"<span style='color:#4a7090;font-size:0.78rem;font-family:Space Mono;font-weight:400;'>"
+            f"{len(df_f)} / {len(df_res)} stocks</span>",
             unsafe_allow_html=True,
         )
 
-        try:
-            res = scan_stock(symbol, sector, threshold_pct)
-            if res:
-                results.append(res)
-            else:
-                errors += 1
-        except Exception:
-            errors += 1
+        # Legend
+        st.markdown("""
+        <div style='background:#0d1520;border:1px solid #1e3a5f;padding:8px 16px;
+                    font-size:0.65rem;font-family:Space Mono,monospace;display:flex;
+                    gap:20px;flex-wrap:wrap;margin-bottom:12px;border-radius:2px;'>
+            <span><span style='color:#00e676'>■</span> RSI ≥70</span>
+            <span><span style='color:#4ddb8a'>■</span> RSI 50-70</span>
+            <span><span style='color:#f5a623'>■</span> RSI 30-50</span>
+            <span><span style='color:#ff4d6d'>■</span> RSI ≤30</span>
+            <span style='color:#4a7090;margin-left:8px;'>✓ = Yes  ✗ = No</span>
+        </div>
+        """, unsafe_allow_html=True)
 
-        prog_bar.progress((i + 1) / total)
-        time.sleep(0.05)
+        if df_f.empty:
+            st.warning("No stocks match current filters. Relax filter conditions.")
+        else:
+            display_cols = ["Symbol","Sector","LTP","% vs 200EMA","% from 52W High",
+                            "EMA Aligned","LTP vs 200EMA","Near Support","MACD Bull",
+                            "Vol Ratio","ATR %","BB %","RSI 14","RSI 21","RSI 63","RSI 126","RSI 252"]
+            display_cols = [c for c in display_cols if c in df_f.columns]
+            try:
+                st.dataframe(style_table(df_f[display_cols]),
+                             use_container_width=True, height=540)
+            except Exception:
+                st.dataframe(df_f[display_cols], use_container_width=True, height=540)
 
-    prog_bar.empty()
-    status_ph.empty()
+            c1, c2, c3 = st.columns([2, 1, 2])
+            with c2:
+                st.download_button(
+                    "↓ EXPORT CSV",
+                    df_f.to_csv(index=False).encode(),
+                    f"alphamomentum_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    "text/csv", use_container_width=True,
+                )
 
-    if not results:
-        st.error("❌ No results. Check internet connection or try fewer stocks.")
-        return
+    # ── TAB 2: Chart ──
+    with t2:
+        st.markdown("## Stock Deep Dive")
+        if df_res.empty:
+            st.info("Run a scan first.")
+        else:
+            syms = df_res["Symbol"].tolist()
+            chosen = st.selectbox("Select symbol", syms)
+            if chosen:
+                col_info = st.columns(6)
+                row = df_res[df_res["Symbol"] == chosen].iloc[0]
+                for col_w, (label, key) in zip(col_info, [
+                    ("LTP", "LTP"), ("RSI 14", "RSI 14"), ("RSI 63", "RSI 63"),
+                    ("% vs 200EMA", "% vs 200EMA"), ("EMA Aligned", "EMA Aligned"), ("Near Sup", "Near Support"),
+                ]):
+                    col_w.metric(label, row.get(key, "–"))
 
-    df_res = pd.DataFrame(results)
+                with st.spinner(f"Loading chart for {chosen}..."):
+                    df_chart = fetch_daily_data(chosen)
+                plot_stock(chosen, df_chart)
 
-    # ── APPLY FILTERS ──
-    df_filt = df_res.copy()
-    if filter_near_support: df_filt = df_filt[df_filt["Near Support"] == "YES"]
-    if filter_ema_aligned:  df_filt = df_filt[df_filt["EMA Aligned"]  == "YES"]
-    if filter_above_200:    df_filt = df_filt[df_filt["LTP > 200EMA"] == "ABOVE"]
-    if filter_rsi14_bull:   df_filt = df_filt[df_filt["RSI 14"] > 50]
+    # ── TAB 3: Portfolio ──
+    with t3:
+        show_portfolio_tab(df_f if not df_f.empty else df_res)
 
-    if sort_col in df_filt.columns:
-        df_filt = df_filt.sort_values(sort_col, ascending=sort_asc)
+    # ── TAB 4: Clusters ──
+    with t4:
+        show_cluster_tab(df_f if not df_f.empty else df_res)
 
-    # ── BREADTH ──
-    show_breadth(df_res)
+    # ── TAB 5: Sectors ──
+    with t5:
+        show_sector_breakdown(df_f if not df_f.empty else df_res)
 
-    # ── RESULTS TABLE ──
-    st.markdown(f"## 📋 Scanner Results &nbsp; <span style='color:#00ffff80;font-size:1rem;font-family:Share Tech Mono'>{len(df_filt)} / {len(df_res)} stocks</span>", unsafe_allow_html=True)
-
+    # Footer
     st.markdown("""
-    <div style='background:#011c22;border:1px solid #00ffff20;border-radius:6px;padding:10px 16px;margin-bottom:12px;font-family:Share Tech Mono,monospace;font-size:0.78rem;display:flex;gap:24px;flex-wrap:wrap;'>
-        <span><span style='color:#39ff14'>■</span> RSI ≥ 70 Overbought</span>
-        <span><span style='color:#00e600'>■</span> RSI 50-70 Bullish</span>
-        <span><span style='color:#ff6666'>■</span> RSI 30-50 Bearish</span>
-        <span><span style='color:#ff1111'>■</span> RSI ≤ 30 Oversold</span>
-        <span><span style='color:#00ffff'>■</span> Near Support Zone</span>
-        <span><span style='color:#39ff14'>■</span> EMA Aligned Bullish</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    if df_filt.empty:
-        st.warning("⚠️ No stocks match current filters. Try relaxing the filter conditions.")
-    else:
-        try:
-            st.dataframe(style_table(df_filt), use_container_width=True, height=520)
-        except Exception:
-            st.dataframe(df_filt, use_container_width=True, height=520)
-
-        # Download
-        csv_data = df_filt.to_csv(index=False).encode()
-        c1, c2, c3 = st.columns([2, 1, 2])
-        with c2:
-            st.download_button(
-                "📥  EXPORT CSV",
-                csv_data,
-                f"nse_scanner_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                "text/csv",
-                use_container_width=True,
-            )
-
-    st.divider()
-
-    # ── SECTOR BREAKDOWN ──
-    show_sector_breakdown(df_filt if not df_filt.empty else df_res)
-
-    # ── FOOTER ──
-    if errors > 0:
-        st.info(f"ℹ️ {errors} symbols returned no data (delisted / insufficient history / API limit).")
-    st.markdown("""
-    <p style='text-align:center;color:#334444;font-family:Share Tech Mono,monospace;font-size:0.72rem;margin-top:20px;'>
-        ⚠️ FOR EDUCATIONAL & RESEARCH PURPOSES ONLY · NOT INVESTMENT ADVICE · DATA: YAHOO FINANCE / NIFTYINDICES
+    <div style='height:1px;background:linear-gradient(90deg,transparent,#1e3a5f,transparent);margin:32px 0 16px;'></div>
+    <p style='text-align:center;color:#1e3a5f;font-family:Space Mono,monospace;font-size:0.62rem;'>
+    FOR EDUCATIONAL & RESEARCH USE ONLY  ·  NOT INVESTMENT ADVICE  ·  DATA: YAHOO FINANCE / NIFTYINDICES
     </p>
     """, unsafe_allow_html=True)
+
 
 if __name__ == "__main__":
     main()
