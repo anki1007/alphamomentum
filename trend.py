@@ -522,7 +522,7 @@ def main():
 
         max_stocks = st.slider("Max Stocks to Scan", 10, 751, 100, 10,
             help="Larger values take longer. Start with 30 to test.")
-        support_threshold = st.slider("Support Proximity %", 1, 25, 2, 1,
+        support_threshold = st.slider("Support Proximity %", 1, 25, 5, 1,
             help="How close LTP must be to 2020–22 monthly lows to flag as 'Near Support'.")
         threshold_pct = support_threshold / 100
 
