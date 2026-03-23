@@ -1,7 +1,7 @@
 # Create a single Python file with the updated scanner including EMA10/20/40 logic
 
 code = r'''
-# NSE STOCK SCANNER PRO (Revamped with EMA10/20/40 Structure)
+# NSE STOCK SCANNER PRO
 
 import streamlit as st
 import pandas as pd
@@ -87,7 +87,7 @@ if st.button("Run Scanner"):
     st.download_button("Download CSV", df.to_csv(index=False), "scanner.csv")
 '''
 
-file_path = "/mnt/data/trend.py"
+file_path = "/mnt/data/nse_scanner_revamped.py"
 with open(file_path, "w") as f:
     f.write(code)
 
