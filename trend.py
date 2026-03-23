@@ -248,6 +248,43 @@ def get_support_levels(df: pd.DataFrame, threshold_pct: float) -> tuple:
 
     return near, round(nearest, 2) if nearest else None, yearly_low, yearly_high, monthly
 
+
+# ── YEARLY OHLC ──────────────────────────────────────────────────────────────
+def get_yearly_ohlc(df: pd.DataFrame, year: int) -> dict:
+    """Return yearly High, Low, Close for a given year."""
+    yr_df = df[df.index.year == year]
+    if yr_df.empty:
+        return {"High": np.nan, "Low": np.nan, "Close": np.nan}
+    return {
+        "High" : round(yr_df["High"].max(), 2),
+        "Low"  : round(yr_df["Low"].min(), 2),
+        "Close": round(yr_df["Close"].iloc[-1], 2),
+    }
+
+
+# ── 52-WEEK METRICS ──────────────────────────────────────────────────────────
+def get_52week_metrics(df: pd.DataFrame) -> dict:
+    """Return 52-week high, low and derived metrics."""
+    if df.empty or len(df) < 5:
+        return {"52W High": np.nan, "52W Low": np.nan,
+                "Retr from 52W High %": np.nan, "% Above 52W Low": np.nan}
+
+    last_252 = df.tail(252)
+    w52_high = round(last_252["High"].max(), 2)
+    w52_low  = round(last_252["Low"].min(), 2)
+    ltp      = df["Close"].iloc[-1]
+
+    retr_from_high = round((ltp / w52_high - 1) * 100, 2) if w52_high > 0 else np.nan
+    pct_above_low  = round((ltp / w52_low  - 1) * 100, 2) if w52_low  > 0 else np.nan
+
+    return {
+        "52W High"           : w52_high,
+        "52W Low"            : w52_low,
+        "Retr from 52W High %": retr_from_high,
+        "% Above 52W Low"    : pct_above_low,
+    }
+
+
 # ── SCAN ONE STOCK ───────────────────────────────────────────────────────────
 def scan_stock(symbol: str, sector: str, threshold_pct: float) -> dict | None:
     df = fetch_daily_data(symbol)
@@ -272,40 +309,99 @@ def scan_stock(symbol: str, sector: str, threshold_pct: float) -> dict | None:
     r252 = rsi(close, 252)
 
     near_sup, sup_level, yr_low, yr_high, _ = get_support_levels(df, threshold_pct)
-
     pct_from_200 = round((ltp / e200 - 1) * 100, 2) if e200 > 0 else 0
 
+    # ── Yearly OHLC ──
+    y2020 = get_yearly_ohlc(df, 2020)
+    y2021 = get_yearly_ohlc(df, 2021)
+    y2022 = get_yearly_ohlc(df, 2022)
+
+    def yn(cond): return "YES" if cond else "NO"
+    def safe_gt(a, b): return yn(a > b) if pd.notna(b) and b > 0 else "-"
+
+    # ── 52-week metrics ──
+    w52 = get_52week_metrics(df)
+
     return {
+        # ── Core ──
         "Symbol"        : symbol,
         "Sector"        : sector,
         "LTP"           : ltp,
-	"10 EMA"        : e10,
+
+        # ── EMA ──
+        "10 EMA"        : e10,
         "20 EMA"        : e20,
         "40 EMA"        : e40,
         "50 EMA"        : e50,
         "200 EMA"       : e200,
         "% vs 200EMA"   : pct_from_200,
         "EMA Aligned"   : "YES" if aligned else "NO",
-        "LTP > 10EMA"  : "ABOVE" if ltp > e10 else "BELOW",
-		"LTP > 20EMA"  : "ABOVE" if ltp > e20 else "BELOW",
-		"LTP > 200EMA"  : "ABOVE" if ltp > e200 else "BELOW",
-		"EMA10 > EMA20"  : "YES" if e10 > e20 else "NO",
-		"EMA20 > EMA40"  : "YES" if e20 > e40 else "NO",
-		"Near Support"  : "YES" if near_sup else "-",
+        "LTP > 10EMA"   : "ABOVE" if ltp > e10  else "BELOW",
+        "LTP > 20EMA"   : "ABOVE" if ltp > e20  else "BELOW",
+        "LTP > 200EMA"  : "ABOVE" if ltp > e200 else "BELOW",
+        "EMA10 > EMA20" : yn(e10 > e20),
+        "EMA20 > EMA40" : yn(e20 > e40),
+
+        # ── Support ──
+        "Near Support"  : "YES" if near_sup else "-",
         "Support Level" : sup_level if sup_level else np.nan,
-        "2020-22 Low"   : yr_low if yr_low else np.nan,
+        "2020-22 Low"   : yr_low  if yr_low  else np.nan,
         "2020-22 High"  : yr_high if yr_high else np.nan,
-        "RSI 14"        : r14,
-        "RSI 21"        : r21,
-        "RSI 63"        : r63,
-        "RSI 126"       : r126,
-        "RSI 252"       : r252,
+
+        # ── 2020 Yearly OHLC ──
+        "2020 High"     : y2020["High"],
+        "2020 Low"      : y2020["Low"],
+        "2020 Close"    : y2020["Close"],
+        "LTP>2020 High" : safe_gt(ltp, y2020["High"]),
+        "LTP>2020 Low"  : safe_gt(ltp, y2020["Low"]),
+        "LTP>2020 Close": safe_gt(ltp, y2020["Close"]),
+
+        # ── 2021 Yearly OHLC ──
+        "2021 High"     : y2021["High"],
+        "2021 Low"      : y2021["Low"],
+        "2021 Close"    : y2021["Close"],
+        "LTP>2021 High" : safe_gt(ltp, y2021["High"]),
+        "LTP>2021 Low"  : safe_gt(ltp, y2021["Low"]),
+        "LTP>2021 Close": safe_gt(ltp, y2021["Close"]),
+
+        # ── 2022 Yearly OHLC ──
+        "2022 High"     : y2022["High"],
+        "2022 Low"      : y2022["Low"],
+        "2022 Close"    : y2022["Close"],
+        "LTP>2022 High" : safe_gt(ltp, y2022["High"]),
+        "LTP>2022 Low"  : safe_gt(ltp, y2022["Low"]),
+        "LTP>2022 Close": safe_gt(ltp, y2022["Close"]),
+
+        # ── 52-Week ──
+        "52W High"              : w52["52W High"],
+        "52W Low"               : w52["52W Low"],
+        "Retr from 52W High %"  : w52["Retr from 52W High %"],
+        "% Above 52W Low"       : w52["% Above 52W Low"],
+
+        # ── RSI ──
+        "RSI 14"  : r14,
+        "RSI 21"  : r21,
+        "RSI 63"  : r63,
+        "RSI 126" : r126,
+        "RSI 252" : r252,
     }
 
 # ── STYLING ──────────────────────────────────────────────────────────────────
-RSI_COLS = ["RSI 14", "RSI 21", "RSI 63", "RSI 126", "RSI 252"]
+RSI_COLS      = ["RSI 14", "RSI 21", "RSI 63", "RSI 126", "RSI 252"]
+YN_COLS       = [
+    "LTP>2020 High", "LTP>2020 Low", "LTP>2020 Close",
+    "LTP>2021 High", "LTP>2021 Low", "LTP>2021 Close",
+    "LTP>2022 High", "LTP>2022 Low", "LTP>2022 Close",
+    "EMA10 > EMA20", "EMA20 > EMA40",
+]
+ABOVE_BELOW_COLS = ["LTP > 10EMA", "LTP > 20EMA", "LTP > 200EMA"]
+RETR_COLS     = ["Retr from 52W High %"]
+PCT52W_COLS   = ["% Above 52W Low"]
+
 
 def style_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
+
+    # RSI: red < 50, green ≥ 50 (intensity varies)
     def rsi_color(val):
         try:
             v = float(val)
@@ -349,16 +445,85 @@ def style_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         except:
             return ""
 
+    # YES/NO columns: green YES, red NO
+    def yn_color(val):
+        s = str(val)
+        if s == "YES":
+            return "background-color:#001a00;color:#39ff14;font-weight:bold;text-align:center"
+        elif s == "NO":
+            return "background-color:#2a0a0a;color:#ff4444;text-align:center"
+        return "color:#445555;text-align:center"
+
+    # Retracement from 52W high: always negative — red deeper = further from high
+    def retr_color(val):
+        try:
+            v = float(val)
+            if v >= -5:
+                return "color:#39ff14;font-weight:bold"
+            elif v >= -15:
+                return "color:#ffaa00"
+            elif v >= -30:
+                return "color:#ff6666"
+            else:
+                return "color:#ff1111;font-weight:bold"
+        except:
+            return ""
+
+    # % above 52W low: green = far above low (big recovery)
+    def pct52w_color(val):
+        try:
+            v = float(val)
+            if v >= 50:
+                return "color:#39ff14;font-weight:bold"
+            elif v >= 20:
+                return "color:#00cc00"
+            elif v >= 5:
+                return "color:#ffaa00"
+            else:
+                return "color:#ff4444"
+        except:
+            return ""
+
+    # Row-level highlight: if RSI 252 > 50 → light neon green row background
+    def highlight_rsi252_row(row):
+        try:
+            if float(row.get("RSI 252", 0)) > 50:
+                return ["background-color:#002a00;border-left:3px solid #39ff14"] * len(row)
+        except:
+            pass
+        return [""] * len(row)
+
+    # Subset helpers — only style columns that exist in df
+    def safe_subset(cols):
+        return [c for c in cols if c in df.columns]
+
     try:
-        # pandas >= 2.1 uses .map instead of .applymap
+        styler = df.style.apply(highlight_rsi252_row, axis=1)
+
+        if safe_subset(RSI_COLS):
+            styler = styler.map(rsi_color, subset=safe_subset(RSI_COLS))
+        if "EMA Aligned" in df.columns:
+            styler = styler.map(ema_align_color, subset=["EMA Aligned"])
+        if safe_subset(ABOVE_BELOW_COLS):
+            styler = styler.map(ltp_200_color, subset=safe_subset(ABOVE_BELOW_COLS))
+        if "Near Support" in df.columns:
+            styler = styler.map(support_color, subset=["Near Support"])
+        if "% vs 200EMA" in df.columns:
+            styler = styler.map(pct_color, subset=["% vs 200EMA"])
+        if safe_subset(YN_COLS):
+            styler = styler.map(yn_color, subset=safe_subset(YN_COLS))
+        if safe_subset(RETR_COLS):
+            styler = styler.map(retr_color, subset=safe_subset(RETR_COLS))
+        if safe_subset(PCT52W_COLS):
+            styler = styler.map(pct52w_color, subset=safe_subset(PCT52W_COLS))
+
         styler = (
-            df.style
-            .map(rsi_color, subset=RSI_COLS)
-            .map(ema_align_color, subset=["EMA Aligned"])
-            .map(ltp_200_color, subset=["LTP > 200EMA"])
-            .map(support_color, subset=["Near Support"])
-            .map(pct_color, subset=["% vs 200EMA"])
-            .set_properties(**{"background-color": "#010f14", "color": "#c8e6f0", "border-color": "#00ffff15"})
+            styler
+            .set_properties(**{
+                "background-color": "#010f14",
+                "color": "#c8e6f0",
+                "border-color": "#00ffff15",
+            })
             .set_table_styles([
                 {"selector": "thead th", "props": [
                     ("background-color", "#003d4d"),
@@ -368,21 +533,33 @@ def style_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
                     ("letter-spacing", "0.5px"),
                     ("border-bottom", "2px solid #00ffff50"),
                 ]},
-                {"selector": "tbody tr:hover td", "props": [("background-color", "#00ffff10")]},
+                {"selector": "tbody tr:hover td", "props": [
+                    ("background-color", "#00ffff10"),
+                ]},
             ])
             .format(precision=2, na_rep="-")
         )
     except TypeError:
-        # fallback for older pandas
-        styler = (
-            df.style
-            .applymap(rsi_color, subset=RSI_COLS)
-            .applymap(ema_align_color, subset=["EMA Aligned"])
-            .applymap(ltp_200_color, subset=["LTP > 200EMA"])
-            .applymap(support_color, subset=["Near Support"])
-            .applymap(pct_color, subset=["% vs 200EMA"])
-            .format(precision=2, na_rep="-")
-        )
+        # Fallback for older pandas (applymap)
+        styler = df.style.apply(highlight_rsi252_row, axis=1)
+        if safe_subset(RSI_COLS):
+            styler = styler.applymap(rsi_color, subset=safe_subset(RSI_COLS))
+        if "EMA Aligned" in df.columns:
+            styler = styler.applymap(ema_align_color, subset=["EMA Aligned"])
+        if safe_subset(ABOVE_BELOW_COLS):
+            styler = styler.applymap(ltp_200_color, subset=safe_subset(ABOVE_BELOW_COLS))
+        if "Near Support" in df.columns:
+            styler = styler.applymap(support_color, subset=["Near Support"])
+        if "% vs 200EMA" in df.columns:
+            styler = styler.applymap(pct_color, subset=["% vs 200EMA"])
+        if safe_subset(YN_COLS):
+            styler = styler.applymap(yn_color, subset=safe_subset(YN_COLS))
+        if safe_subset(RETR_COLS):
+            styler = styler.applymap(retr_color, subset=safe_subset(RETR_COLS))
+        if safe_subset(PCT52W_COLS):
+            styler = styler.applymap(pct52w_color, subset=safe_subset(PCT52W_COLS))
+        styler = styler.format(precision=2, na_rep="-")
+
     return styler
 
 # ── BREADTH DISPLAY ──────────────────────────────────────────────────────────
@@ -400,6 +577,7 @@ def show_breadth(df: pd.DataFrame):
     rsi14_overbuy  = (df["RSI 14"] > 70).sum()
     rsi14_oversold = (df["RSI 14"] < 30).sum()
     all_rsi_bull   = ((df["RSI 14"] > 50) & (df["RSI 21"] > 50) & (df["RSI 63"] > 50)).sum()
+    rsi252_bull    = (df["RSI 252"] > 50).sum()
 
     def pct(x): return f"{x} ({int(100*x/n)}%)"
 
@@ -422,8 +600,7 @@ def show_breadth(df: pd.DataFrame):
     cols3[1].metric("📊 Overall Breadth", breadth_status)
     avg_rsi14 = df["RSI 14"].mean()
     cols3[2].metric("📉 Avg RSI14", f"{avg_rsi14:.1f}")
-    avg_rsi63 = df["RSI 63"].mean()
-    cols3[3].metric("📉 Avg RSI63", f"{avg_rsi63:.1f}")
+    cols3[3].metric("📈 RSI252 > 50", pct(rsi252_bull))
 
     st.divider()
 
@@ -437,6 +614,7 @@ def show_sector_breakdown(df: pd.DataFrame):
         Count          = ("Symbol", "count"),
         Avg_RSI14      = ("RSI 14", "mean"),
         Avg_RSI63      = ("RSI 63", "mean"),
+        Avg_RSI252     = ("RSI 252", "mean"),
         Above_200EMA   = ("LTP > 200EMA", lambda x: (x == "ABOVE").sum()),
         EMA_Aligned    = ("EMA Aligned", lambda x: (x == "YES").sum()),
         Near_Support   = ("Near Support", lambda x: (x == "YES").sum()),
@@ -505,11 +683,25 @@ def draw_idle():
             </div>
             <div style="background:#011c22;border:1px solid #39ff1420;border-radius:8px;padding:16px;">
                 <div style="color:#39ff14;font-size:1.4rem;">📈</div>
-                <p style="color:#a0d8df;font-size:0.78rem;margin-top:6px;">EMA 20/50/200<br>Alignment Check</p>
+                <p style="color:#a0d8df;font-size:0.78rem;margin-top:6px;">EMA 10/20/40/50/200<br>Alignment Check</p>
             </div>
             <div style="background:#011c22;border:1px solid #ff6ec720;border-radius:8px;padding:16px;">
                 <div style="color:#ff6ec7;font-size:1.4rem;">🌊</div>
                 <p style="color:#a0d8df;font-size:0.78rem;margin-top:6px;">RSI 14/21/63/126/252<br>Multi-Timeframe</p>
+            </div>
+        </div>
+        <div style="margin-top:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px;max-width:700px;margin-left:auto;margin-right:auto;">
+            <div style="background:#011c22;border:1px solid #ff6ec720;border-radius:8px;padding:16px;">
+                <div style="color:#ffaa00;font-size:1.4rem;">📅</div>
+                <p style="color:#a0d8df;font-size:0.78rem;margin-top:6px;">Yearly High / Low / Close<br>2020 · 2021 · 2022</p>
+            </div>
+            <div style="background:#011c22;border:1px solid #39ff1420;border-radius:8px;padding:16px;">
+                <div style="color:#39ff14;font-size:1.4rem;">📉</div>
+                <p style="color:#a0d8df;font-size:0.78rem;margin-top:6px;">Retracement from<br>52-Week High</p>
+            </div>
+            <div style="background:#011c22;border:1px solid #00ffff20;border-radius:8px;padding:16px;">
+                <div style="color:#00ffff;font-size:1.4rem;">🚀</div>
+                <p style="color:#a0d8df;font-size:0.78rem;margin-top:6px;">% Above<br>52-Week Low</p>
             </div>
         </div>
     </div>
@@ -532,26 +724,33 @@ def main():
 
         st.markdown("---")
         st.markdown("### 🔍 FILTERS")
-        filter_near_support = st.checkbox("Near Support Only",  False)
-        filter_ema_aligned  = st.checkbox("EMA Aligned Only",   False)
-        filter_above_200    = st.checkbox("Above 200 EMA Only", False)
-        filter_rsi14_bull   = st.checkbox("RSI14 > 50 Only",    False)
+        filter_near_support  = st.checkbox("Near Support Only",   False)
+        filter_ema_aligned   = st.checkbox("EMA Aligned Only",    False)
+        filter_above_200     = st.checkbox("Above 200 EMA Only",  False)
+        filter_rsi14_bull    = st.checkbox("RSI14 > 50 Only",     False)
+        filter_rsi252_bull   = st.checkbox("RSI252 > 50 Only",    False)
+        filter_above_2022h   = st.checkbox("LTP > 2022 High Only",False)
 
         st.markdown("---")
         st.markdown("### 📊 SORT BY")
-        sort_col = st.selectbox("Column", ["RSI 14", "LTP", "% vs 200EMA", "RSI 63", "Symbol"])
+        sort_col = st.selectbox("Column", [
+            "RSI 14", "LTP", "% vs 200EMA", "RSI 63", "RSI 252",
+            "Retr from 52W High %", "% Above 52W Low", "Symbol",
+        ])
         sort_asc = st.checkbox("Ascending", False)
 
         st.markdown("---")
         st.markdown("""
         <div style='color:#445555;font-size:0.72rem;font-family:Share Tech Mono,monospace;line-height:1.8;'>
-        🟢 RSI > 70  Overbought<br>
-        🟡 RSI > 50  Bullish<br>
-        🟠 RSI < 50  Bearish<br>
-        🔴 RSI < 30  Oversold<br>
-        ─────────────────────<br>
-        ⚡ Near Support = within {threshold}% of<br>
-        monthly lows (2020–22)
+        🟢 RSI ≥ 70  Overbought<br>
+        🟢 RSI ≥ 50  Bullish<br>
+        🔴 RSI &lt; 50  Bearish<br>
+        🔴 RSI &lt; 30  Oversold<br>
+        ──────────────────────<br>
+        🌿 Row glow = RSI 252 &gt; 50<br>
+        ──────────────────────<br>
+        ⚡ Near Support = within {threshold}%<br>
+        of monthly lows (2020–22)
         </div>
         """.format(threshold=support_threshold), unsafe_allow_html=True)
 
@@ -567,7 +766,6 @@ def main():
     if stocks_df is None or (isinstance(stocks_df, pd.DataFrame) and stocks_df.empty):
         st.error(f"❌ Could not load stock list. Error: {err}")
         st.info("ℹ️ niftyindices.com may block direct requests. Using a fallback sample list.")
-        # Minimal fallback
         stocks_df = pd.DataFrame({
             "Symbol": ["RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK","HINDUNILVR","SBIN","BHARTIARTL","ITC","KOTAKBANK",
                        "WIPRO","LTIM","AXISBANK","MARUTI","SUNPHARMA","TITAN","NESTLEIND","POWERGRID","NTPC","ULTRACEMCO"],
@@ -578,12 +776,10 @@ def main():
     else:
         st.success(f"✅ {len(stocks_df)} stocks loaded from Nifty Total Market")
 
-    # Identify columns
     cols_lower = {c.lower(): c for c in stocks_df.columns}
     sym_col = next((cols_lower[k] for k in ["symbol", "sym"] if k in cols_lower), stocks_df.columns[0])
     sec_col = next((cols_lower[k] for k in ["industry", "sector", "ind"] if k in cols_lower), None)
 
-    # Sector quick-filter (sidebar)
     if sec_col:
         all_sectors = sorted(stocks_df[sec_col].dropna().astype(str).unique().tolist())
         with st.sidebar:
@@ -651,10 +847,12 @@ def main():
 
     # ── APPLY FILTERS ──
     df_filt = df_res.copy()
-    if filter_near_support: df_filt = df_filt[df_filt["Near Support"] == "YES"]
-    if filter_ema_aligned:  df_filt = df_filt[df_filt["EMA Aligned"]  == "YES"]
-    if filter_above_200:    df_filt = df_filt[df_filt["LTP > 200EMA"] == "ABOVE"]
-    if filter_rsi14_bull:   df_filt = df_filt[df_filt["RSI 14"] > 50]
+    if filter_near_support : df_filt = df_filt[df_filt["Near Support"]  == "YES"]
+    if filter_ema_aligned  : df_filt = df_filt[df_filt["EMA Aligned"]   == "YES"]
+    if filter_above_200    : df_filt = df_filt[df_filt["LTP > 200EMA"]  == "ABOVE"]
+    if filter_rsi14_bull   : df_filt = df_filt[df_filt["RSI 14"]        > 50]
+    if filter_rsi252_bull  : df_filt = df_filt[df_filt["RSI 252"]       > 50]
+    if filter_above_2022h  : df_filt = df_filt[df_filt["LTP>2022 High"] == "YES"]
 
     if sort_col in df_filt.columns:
         df_filt = df_filt.sort_values(sort_col, ascending=sort_asc)
@@ -663,16 +861,25 @@ def main():
     show_breadth(df_res)
 
     # ── RESULTS TABLE ──
-    st.markdown(f"## 📋 Scanner Results &nbsp; <span style='color:#00ffff80;font-size:1rem;font-family:Share Tech Mono'>{len(df_filt)} / {len(df_res)} stocks</span>", unsafe_allow_html=True)
+    st.markdown(
+        f"## 📋 Scanner Results &nbsp;"
+        f"<span style='color:#00ffff80;font-size:1rem;font-family:Share Tech Mono'>"
+        f"{len(df_filt)} / {len(df_res)} stocks</span>",
+        unsafe_allow_html=True,
+    )
 
     st.markdown("""
-    <div style='background:#011c22;border:1px solid #00ffff20;border-radius:6px;padding:10px 16px;margin-bottom:12px;font-family:Share Tech Mono,monospace;font-size:0.78rem;display:flex;gap:24px;flex-wrap:wrap;'>
+    <div style='background:#011c22;border:1px solid #00ffff20;border-radius:6px;padding:10px 16px;
+                margin-bottom:12px;font-family:Share Tech Mono,monospace;font-size:0.78rem;
+                display:flex;gap:24px;flex-wrap:wrap;'>
         <span><span style='color:#39ff14'>■</span> RSI ≥ 70 Overbought</span>
-        <span><span style='color:#00e600'>■</span> RSI 50-70 Bullish</span>
-        <span><span style='color:#ff6666'>■</span> RSI 30-50 Bearish</span>
+        <span><span style='color:#00e600'>■</span> RSI 50–70 Bullish</span>
+        <span><span style='color:#ff6666'>■</span> RSI 30–50 Bearish</span>
         <span><span style='color:#ff1111'>■</span> RSI ≤ 30 Oversold</span>
         <span><span style='color:#00ffff'>■</span> Near Support Zone</span>
-        <span><span style='color:#39ff14'>■</span> EMA Aligned Bullish</span>
+        <span><span style='color:#39ff14'>■</span> EMA Aligned</span>
+        <span style='background:#002a00;padding:2px 6px;border-radius:3px;border-left:3px solid #39ff14'>
+            🌿 Row = RSI252 &gt; 50</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -680,11 +887,10 @@ def main():
         st.warning("⚠️ No stocks match current filters. Try relaxing the filter conditions.")
     else:
         try:
-            st.dataframe(style_table(df_filt), use_container_width=True, height=520)
+            st.dataframe(style_table(df_filt), use_container_width=True, height=560)
         except Exception:
-            st.dataframe(df_filt, use_container_width=True, height=520)
+            st.dataframe(df_filt, use_container_width=True, height=560)
 
-        # Download
         csv_data = df_filt.to_csv(index=False).encode()
         c1, c2, c3 = st.columns([2, 1, 2])
         with c2:
@@ -709,6 +915,7 @@ def main():
         ⚠️ FOR EDUCATIONAL & RESEARCH PURPOSES ONLY · NOT INVESTMENT ADVICE · DATA: YAHOO FINANCE / NIFTYINDICES
     </p>
     """, unsafe_allow_html=True)
+
 
 if __name__ == "__main__":
     main()
