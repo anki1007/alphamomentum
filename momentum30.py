@@ -60,6 +60,11 @@ CSV_FILES: Dict[str, str] = {
 RS_LOOKBACK_DAYS = 252
 JDK_WINDOW = 21
 
+# Risk-adjusted metric settings (used by UPI & Sharpe)
+RISK_METRIC_WINDOW = 252        # trailing trading days (~1 year)
+RISK_FREE_ANNUAL = 0.065        # annualized risk-free rate as a decimal (6.5%)
+TRADING_DAYS = 252.0
+
 # -------------------- HELPERS --------------------
 def tv_symbol_from_yf(symbol: str) -> str:
     s = symbol.strip().upper()
@@ -105,6 +110,49 @@ def perf_quadrant(x: float, y: float) -> str:
     if x < 100 and y >= 100:  return "Improving"
     if x < 100 and y < 100:   return "Lagging"
     return "Weakening"
+
+# -------------------- RISK-ADJUSTED METRICS --------------------
+def ulcer_index(price: pd.Series, win: int = RISK_METRIC_WINDOW) -> float:
+    """Ulcer Index: RMS of percentage drawdowns from the running peak (lower = smoother)."""
+    s = pd.to_numeric(price, errors="coerce").dropna()
+    if len(s) < 2:
+        return np.nan
+    if len(s) > win:
+        s = s.iloc[-win:]
+    running_max = s.cummax()
+    dd = ((s - running_max) / running_max) * 100.0
+    return float(np.sqrt(np.mean(np.square(dd))))
+
+def ulcer_performance_index(price: pd.Series, win: int = RISK_METRIC_WINDOW,
+                            rf_annual: float = RISK_FREE_ANNUAL) -> float:
+    """Ulcer Performance Index (Martin Ratio) = excess annualized return / Ulcer Index."""
+    s = pd.to_numeric(price, errors="coerce").dropna()
+    if len(s) < 2:
+        return np.nan
+    if len(s) > win:
+        s = s.iloc[-win:]
+    ui = ulcer_index(s, win)
+    if not np.isfinite(ui) or ui == 0:
+        return np.nan
+    n = len(s)
+    total_ret = s.iloc[-1] / s.iloc[0] - 1.0
+    ann_ret = (1.0 + total_ret) ** (TRADING_DAYS / n) - 1.0
+    return float((ann_ret - rf_annual) * 100.0 / ui)
+
+def sharpe_ratio(price: pd.Series, win: int = RISK_METRIC_WINDOW,
+                 rf_annual: float = RISK_FREE_ANNUAL) -> float:
+    """Annualized Sharpe Ratio from daily returns (higher = better risk-adjusted return)."""
+    s = pd.to_numeric(price, errors="coerce").dropna()
+    if len(s) < 3:
+        return np.nan
+    if len(s) > win:
+        s = s.iloc[-win:]
+    rets = s.pct_change().dropna()
+    sd = rets.std(ddof=0)
+    if not np.isfinite(sd) or sd == 0 or len(rets) < 2:
+        return np.nan
+    rf_daily = rf_annual / TRADING_DAYS
+    return float(((rets.mean() - rf_daily) / sd) * np.sqrt(TRADING_DAYS))
 
 def analyze_momentum(adj: pd.Series) -> dict | None:
     if adj is None or adj.empty or len(adj) < 252:
@@ -220,6 +268,8 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
             "RS-Ratio": float(rr.loc[ix].iloc[-1]),
             "RS-Momentum": float(mm.loc[ix].iloc[-1]),
             "Performance": perf_quadrant(float(rr.loc[ix].iloc[-1]), float(mm.loc[ix].iloc[-1])),
+            "UPI": ulcer_performance_index(s),
+            "Sharpe": sharpe_ratio(s),
             "Symbol": sym,
             "Chart": tradingview_chart_url(sym),
         })
@@ -229,7 +279,7 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
     df = pd.DataFrame(rows)
 
     # round numerics
-    for c in ("Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum"):
+    for c in ("Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum", "UPI", "Sharpe"):
         df[c] = pd.to_numeric(df[c], errors="coerce").round(2)
 
     # ranks as ints
@@ -240,6 +290,7 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
 
     df = df.sort_values("Final_Rank", kind="mergesort").reset_index(drop=True)
     df.insert(0, "S.No", np.arange(1, len(df) + 1, dtype=int))
+    # Position = momentum-based position (stays fixed even if the view is re-sorted by UPI / Sharpe)
     df["Position"] = df["S.No"].astype(int)
 
     order = ["S.No", "Name", "Industry",
@@ -247,8 +298,21 @@ def build_table_dataframe(raw: pd.DataFrame, benchmark: str, universe_df: pd.Dat
              "Return_3M", "Rank_3M",
              "Return_1M", "Rank_1M",
              "RS-Ratio", "RS-Momentum", "Performance",
+             "UPI", "Sharpe",
              "Final_Rank", "Position", "Chart", "Symbol"]
     return df[order]
+
+def apply_sort(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
+    """Reorder the view by the chosen key and re-number S.No (Position stays momentum-based)."""
+    sort_map = {
+        "Final Rank":   ("Final_Rank", True),    # ascending: rank 1 is best
+        "UPI":          ("UPI", False),          # descending: higher is better
+        "Sharpe Ratio": ("Sharpe", False),       # descending: higher is better
+    }
+    col, asc = sort_map.get(sort_by, ("Final_Rank", True))
+    out = df.sort_values(col, ascending=asc, kind="mergesort", na_position="last").reset_index(drop=True)
+    out["S.No"] = np.arange(1, len(out) + 1, dtype=int)
+    return out
 
 def style_rows(df: pd.DataFrame):
     def _row_style(r: pd.Series):
@@ -273,6 +337,7 @@ indices_universe = st.sidebar.selectbox("Indices Universe", list(CSV_FILES.keys(
 benchmark_key    = st.sidebar.selectbox("Benchmark", list(BENCHMARKS.keys()), index=2)
 timeframe        = st.sidebar.selectbox("Timeframe (EOD only)", ["1d"], index=0)
 period           = st.sidebar.selectbox("Period", ["1y", "2y", "3y", "5y"], index=1)
+sort_by          = st.sidebar.selectbox("Sort by", ["Final Rank", "UPI", "Sharpe Ratio"], index=0)
 do_load          = st.sidebar.button("Load / Refresh", use_container_width=True)
 
 if "ran_once" not in st.session_state:
@@ -292,6 +357,7 @@ if do_load:
         if raw.empty: st.stop()
 
         df = build_table_dataframe(raw, benchmark, universe_df)
+        df = apply_sort(df, sort_by)
 
         ui_cols = [
             "S.No", "Name", "Industry",
@@ -299,6 +365,7 @@ if do_load:
             "Return_3M", "Rank_3M",
             "Return_1M", "Rank_1M",
             "RS-Ratio", "RS-Momentum", "Performance",
+            "UPI", "Sharpe",
             "Final_Rank", "Position", "Chart"
         ]
         display_df = df[ui_cols].copy()
@@ -310,11 +377,8 @@ if do_load:
         )
         display_df = display_df.drop(columns=["Chart"])
 
-        
-        display_df = display_df.rename(columns={"Final_Rank": "Final_Rank"})
-
         int_cols = ["S.No", "Rank_6M", "Rank_3M", "Rank_1M", "Final_Rank", "Position"]
-        two_dec_cols = ["Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum"]
+        two_dec_cols = ["Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum", "UPI", "Sharpe"]
 
         for c in int_cols:
             display_df[c] = display_df[c].map(lambda v: "-" if pd.isna(v) else f"{int(v)}")
@@ -325,11 +389,11 @@ if do_load:
         table_html = style_rows(display_df).to_html()
         st.markdown(f'<div class="pro-card">{table_html}</div>', unsafe_allow_html=True)
 
-        st.caption(f"{len(df)} results • {indices_universe} • {benchmark_key} • 1d EOD • {period}")
+        st.caption(f"{len(df)} results • {indices_universe} • {benchmark_key} • 1d EOD • {period} • sorted by {sort_by}")
 
         # CSV export (keep numeric types & original column name)
         export_df = df.drop(columns=["Symbol"]).copy()
-        for c in ("Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum"):
+        for c in ("Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum", "UPI", "Sharpe"):
             export_df[c] = pd.to_numeric(export_df[c], errors="coerce").round(2)
         for c in ("S.No", "Rank_6M", "Rank_3M", "Rank_1M", "Final_Rank", "Position"):
             export_df[c] = pd.to_numeric(export_df[c], errors="coerce").astype("Int64")
@@ -344,5 +408,3 @@ if do_load:
 
     except Exception as e:
         st.error(str(e))
-
-
