@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import html as _html
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import yfinance as yf
 from typing import List, Dict
 
@@ -331,6 +333,147 @@ def style_rows(df: pd.DataFrame):
     except Exception: pass
     return styler
 
+# -------------------- SORTABLE HTML TABLE (client-side, click headers) --------------------
+TABLE_COLUMNS = [
+    ("S.No",        "S.No",        "num"),
+    ("Name",        "Name",        "text"),
+    ("Industry",    "Industry",    "text"),
+    ("Return_6M",   "Return_6M",   "num"),
+    ("Rank_6M",     "Rank_6M",     "num"),
+    ("Return_3M",   "Return_3M",   "num"),
+    ("Rank_3M",     "Rank_3M",     "num"),
+    ("Return_1M",   "Return_1M",   "num"),
+    ("Rank_1M",     "Rank_1M",     "num"),
+    ("RS-Ratio",    "RS-Ratio",    "num"),
+    ("RS-Momentum", "RS-Momentum", "num"),
+    ("Performance", "Performance", "text"),
+    ("UPI",         "UPI",         "num"),
+    ("Sharpe",      "Sharpe",      "num"),
+    ("Final_Rank",  "Final_Rank",  "num"),
+    ("Position",    "Position",    "num"),
+]
+INT_KEYS = {"S.No", "Rank_6M", "Rank_3M", "Rank_1M", "Final_Rank", "Position"}
+DEC2_KEYS = {"Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum", "UPI", "Sharpe"}
+
+def build_sortable_table_html(df: pd.DataFrame) -> tuple[str, int]:
+    """Self-contained HTML table with click-to-sort headers, rendered in an iframe via components.html."""
+    # ---- header ----
+    head_cells = []
+    for i, (key, label, typ) in enumerate(TABLE_COLUMNS):
+        align = "left" if key in ("Name", "Industry") else "center"
+        head_cells.append(
+            f'<th class="sortable" data-col="{i}" data-type="{typ}" '
+            f'style="text-align:{align}">{_html.escape(label)}<span class="arrow"></span></th>'
+        )
+    thead = "<thead><tr>" + "".join(head_cells) + "</tr></thead>"
+
+    # ---- body ----
+    body_rows = []
+    for _, r in df.iterrows():
+        tds = []
+        for key, label, typ in TABLE_COLUMNS:
+            v = r[key]
+            if key == "Name":
+                name = _html.escape(str(v))
+                url = _html.escape(str(r["Chart"]), quote=True)
+                disp = f'<a href="{url}" target="_blank" rel="noopener noreferrer">{name}</a>'
+                sortval = _html.escape(str(v).lower(), quote=True)
+                tds.append(f'<td data-sort="{sortval}" style="text-align:left">{disp}</td>')
+                continue
+            if typ == "text":
+                disp = _html.escape(str(v)) if not pd.isna(v) else "-"
+                sortval = _html.escape(str(v).lower(), quote=True) if not pd.isna(v) else ""
+                align = "left" if key == "Industry" else "center"
+                tds.append(f'<td data-sort="{sortval}" style="text-align:{align}">{disp}</td>')
+                continue
+            # numeric
+            if pd.isna(v):
+                disp, sortval = "-", ""
+            elif key in INT_KEYS:
+                disp = sortval = f"{int(v)}"
+            else:
+                disp, sortval = f"{float(v):.2f}", f"{float(v)}"
+            tds.append(
+                f'<td data-sort="{sortval}" '
+                f'style="text-align:center;font-variant-numeric:tabular-nums">{disp}</td>'
+            )
+        body_rows.append("<tr>" + "".join(tds) + "</tr>")
+    tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
+
+    css = """
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap');
+      :root { --bg-2:#10141b; --border:#1f2732; --border-soft:#1a2230; --text:#e6eaee; --text-dim:#b3bdc7; }
+      html, body { margin:0; padding:0; background:transparent;
+        font-family:'Plus Jakarta Sans', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+      .pro-card { background:var(--bg-2); border:1px solid var(--border); border-radius:14px;
+        padding:6px 10px 10px 10px; box-shadow:0 6px 18px rgba(0,0,0,0.35); }
+      table { border-collapse:collapse; font-size:0.86rem; width:100%; color:var(--text); }
+      thead th { position:sticky; top:0; z-index:2; background:#121823; color:var(--text-dim);
+        border-bottom:1px solid var(--border); padding:6px 8px; white-space:nowrap; }
+      th.sortable { cursor:pointer; user-select:none; }
+      th.sortable:hover { color:var(--text); background:#172033; }
+      th .arrow { color:#9ecbff; font-size:0.8em; }
+      tbody td { padding:6px 8px; border-top:1px solid var(--border-soft); white-space:nowrap; }
+      a { text-decoration:none; color:#9ecbff; } a:hover { text-decoration:underline; }
+    </style>
+    """
+
+    script = """
+    <script>
+    (function(){
+      const table = document.getElementById('ams-table');
+      const tbody = table.tBodies[0];
+      function recolor(){
+        const rows = tbody.querySelectorAll('tr');
+        rows.forEach((r,i)=>{
+          const n=i+1; let bg;
+          if(n<=30) bg='rgba(46,204,113,0.12)';
+          else if(n<=60) bg='rgba(255,204,0,0.12)';
+          else if(n<=90) bg='rgba(52,152,219,0.12)';
+          else bg='rgba(231,76,60,0.12)';
+          r.style.backgroundColor=bg;
+        });
+      }
+      function clearArrows(except){
+        table.querySelectorAll('th.sortable').forEach(th=>{
+          if(th!==except){ th.removeAttribute('data-dir');
+            const a=th.querySelector('.arrow'); if(a) a.textContent=''; }
+        });
+      }
+      table.querySelectorAll('th.sortable').forEach(th=>{
+        th.addEventListener('click', ()=>{
+          const col=parseInt(th.dataset.col,10);
+          const type=th.dataset.type;
+          const cur=th.dataset.dir;
+          const dir = !cur ? (type==='num'?'desc':'asc') : (cur==='asc'?'desc':'asc');
+          clearArrows(th);
+          th.dataset.dir=dir;
+          const a=th.querySelector('.arrow'); if(a) a.textContent = dir==='asc'?' \\u25B2':' \\u25BC';
+          const mul = dir==='asc'?1:-1;
+          const rows = Array.from(tbody.querySelectorAll('tr'));
+          rows.sort((ra,rb)=>{
+            let x=ra.children[col].dataset.sort;
+            let y=rb.children[col].dataset.sort;
+            const xn=(x===''||x===undefined), yn=(y===''||y===undefined);
+            if(xn&&yn) return 0; if(xn) return 1; if(yn) return -1;  /* blanks always last */
+            if(type==='num'){ x=parseFloat(x); y=parseFloat(y); }
+            if(x<y) return -1*mul; if(x>y) return 1*mul; return 0;
+          });
+          rows.forEach(r=>tbody.appendChild(r));
+          recolor();
+        });
+      });
+      recolor();
+    })();
+    </script>
+    """
+
+    table_html = f'<div class="pro-card"><table id="ams-table">{thead}{tbody}</table></div>'
+    full_html = css + table_html + script
+    height = min(820, 96 + 34 * (len(df) + 1))
+    return full_html, height
+
 # -------------------- UI --------------------
 st.sidebar.header("Controls")
 indices_universe = st.sidebar.selectbox("Indices Universe", list(CSV_FILES.keys()), index=0)
@@ -359,37 +502,14 @@ if do_load:
         df = build_table_dataframe(raw, benchmark, universe_df)
         df = apply_sort(df, sort_by)
 
-        ui_cols = [
-            "S.No", "Name", "Industry",
-            "Return_6M", "Rank_6M",
-            "Return_3M", "Rank_3M",
-            "Return_1M", "Rank_1M",
-            "RS-Ratio", "RS-Momentum", "Performance",
-            "UPI", "Sharpe",
-            "Final_Rank", "Position", "Chart"
-        ]
-        display_df = df[ui_cols].copy()
-
-        # Link the Name column
-        display_df["Name"] = display_df.apply(
-            lambda r: f'<a href="{r["Chart"]}" target="_blank" rel="noopener noreferrer">{r["Name"]}</a>',
-            axis=1
-        )
-        display_df = display_df.drop(columns=["Chart"])
-
-        int_cols = ["S.No", "Rank_6M", "Rank_3M", "Rank_1M", "Final_Rank", "Position"]
-        two_dec_cols = ["Return_6M", "Return_3M", "Return_1M", "RS-Ratio", "RS-Momentum", "UPI", "Sharpe"]
-
-        for c in int_cols:
-            display_df[c] = display_df[c].map(lambda v: "-" if pd.isna(v) else f"{int(v)}")
-        for c in two_dec_cols:
-            display_df[c] = display_df[c].map(lambda v: "-" if pd.isna(v) else f"{float(v):.2f}")
-
         st.subheader("Alpha Momentum 30")
-        table_html = style_rows(display_df).to_html()
-        st.markdown(f'<div class="pro-card">{table_html}</div>', unsafe_allow_html=True)
+        table_html, table_height = build_sortable_table_html(df)
+        components.html(table_html, height=table_height, scrolling=True)
 
-        st.caption(f"{len(df)} results • {indices_universe} • {benchmark_key} • 1d EOD • {period} • sorted by {sort_by}")
+        st.caption(
+            f"{len(df)} results • {indices_universe} • {benchmark_key} • 1d EOD • {period} "
+            f"• default sort: {sort_by} • click any column header to re-sort"
+        )
 
         # CSV export (keep numeric types & original column name)
         export_df = df.drop(columns=["Symbol"]).copy()
