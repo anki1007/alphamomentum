@@ -227,7 +227,7 @@ def compute_ema(series: pd.Series, period: int) -> pd.Series:
     return series.ewm(span=period, adjust=False).mean()
 
 
-def compute_supertrend(high, low, close, period=7, multiplier=2.5):
+def compute_supertrend(high, low, close, period=1, multiplier=2.5):
     """Simple Supertrend implementation."""
     hl2 = (high + low) / 2
     atr = pd.Series(index=close.index, dtype=float)
