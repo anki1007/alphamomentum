@@ -541,7 +541,7 @@ with st.sidebar:
     show_all = st.checkbox("Show All Passing Stocks", value=False)
 
     st.markdown('<hr class="sidebar-divider">', unsafe_allow_html=True)
-    run_btn = st.button("▶  Run Screen", use_container_width=True, type="primary")
+    run_btn = st.button("▶  Run Screen", width="stretch", type="primary")
 
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -849,18 +849,15 @@ def render_table(df):
             else:          return "color: #f87171"
         except: return ""
 
-    # Work on a copy; st.dataframe with column_config handles the Chart URL column
-    # natively as a clickable link — no Styler support needed for that column.
-    has_chart = "Chart" in df.columns
-    data_cols = [c for c in df.columns if c != "Chart"]
-    df_data   = df[data_cols].copy()
-
-    styled = df_data.style.map(style_zone, subset=["Zone"])
-    if "Retracement%" in data_cols:
+    # Build the Styler on the FULL frame (Chart included) so column positions
+    # stay consistent through render. Styling ops only touch named subsets; the
+    # Chart column rides along untouched and is read by column_config as a URL.
+    styled = df.style.map(style_zone, subset=["Zone"])
+    if "Retracement%" in df.columns:
         styled = styled.map(color_retracement, subset=["Retracement%"])
-    if "UPI" in data_cols:
+    if "UPI" in df.columns:
         styled = styled.map(color_upi, subset=["UPI"])
-    if "Sharpe" in data_cols:
+    if "Sharpe" in df.columns:
         styled = styled.map(color_sharpe, subset=["Sharpe"])
     styled = (
         styled
@@ -869,12 +866,8 @@ def render_table(df):
         .set_properties(**{"font-family": "DM Mono, monospace", "font-size": "12px"})
     )
 
-    # Inject Chart URL back into the underlying DataFrame so column_config works
-    if has_chart:
-        styled.data["Chart"] = df["Chart"].values
-
     col_cfg = {}
-    if has_chart:
+    if "Chart" in df.columns:
         col_cfg["Chart"] = st.column_config.LinkColumn(
             "📈 Chart",
             help="Open chart on TradingView",
@@ -882,7 +875,7 @@ def render_table(df):
             width="small",
         )
 
-    st.dataframe(styled, column_config=col_cfg, use_container_width=True, height=520)
+    st.dataframe(styled, column_config=col_cfg, width="stretch", height=520)
 
 with tab1:
     top_df = display_df.head(top_n)
@@ -938,7 +931,7 @@ st.dataframe(
               .format({"RS252":"{:.1f}", "RS88":"{:.1f}", "CompositeRS":"{:.1f}",
                        "UPI":"{:.3f}", "Sharpe":"{:.3f}", "Retracement%":"{:+.2f}%"}, na_rep="—")
               .set_properties(**{"font-family": "DM Mono, monospace", "font-size": "12px"}),
-    use_container_width=True,
+    width="stretch",
     height=300,
 )
 
@@ -949,12 +942,12 @@ with dl1:
     csv_full = results_df.to_csv(index=False)
     st.download_button("⬇ Download Full Results (CSV)", csv_full,
                        file_name=f"momentum_screen_{indices_universe.replace(' ','_')}_{period}.csv",
-                       mime="text/csv", use_container_width=True)
+                       mime="text/csv", width="stretch")
 with dl2:
     csv_top = results_df.head(top_n).to_csv(index=False)
     st.download_button(f"⬇ Download Top {top_n} Portfolio (CSV)", csv_top,
                        file_name=f"portfolio_top{top_n}_{period}.csv",
-                       mime="text/csv", use_container_width=True)
+                       mime="text/csv", width="stretch")
 
 # ─── RULES FOOTER ─────────────────────────────────────────────────────────────
 with st.expander("📋 Entry / Exit Rules Reference"):
