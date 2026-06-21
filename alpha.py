@@ -164,10 +164,18 @@ INDEX_URLS = {
 BENCHMARK_TICKERS = {
     "Nifty 50 (NSEI)":  "^NSEI",
     "Nifty 200 (CNX200)":"^CNX200",
-    "Nifty 500 (CNX500)":"^CRSLDX",
+    "Nifty 500 (CNX500)":"CRSLDX",
 }
 
 PERIOD_DAYS = {"1y": 365, "2y": 730, "3y": 1095, "5y": 1825}
+
+# yFinance rate-limits / delists NSE index tickers intermittently.
+# Fallback chain tried in order until one returns sufficient data.
+BENCHMARK_FALLBACKS = {
+    "^NSEI":   ["^NSEI",   "NIFTYBEES.NS"],
+    "^CNX200": ["^CNX200", "^NSEI",  "NIFTYBEES.NS"],
+    "^CNX500": ["CRSLDX",  "^CNX500", "^NSEI", "NIFTYBEES.NS"],
+}
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -227,7 +235,7 @@ def compute_ema(series: pd.Series, period: int) -> pd.Series:
     return series.ewm(span=period, adjust=False).mean()
 
 
-def compute_supertrend(high, low, close, period=1, multiplier=2.5):
+def compute_supertrend(high, low, close, period=7, multiplier=2.5):
     """Simple Supertrend implementation."""
     hl2 = (high + low) / 2
     atr = pd.Series(index=close.index, dtype=float)
@@ -307,9 +315,15 @@ def run_momentum_screen(
     universe_ret_88  = ret_88.dropna()
 
     # ── Market Regime ──────────────────────────────────────────────────────────
-    bench_close = bench_prices.dropna()
-    ema200_bench = compute_ema(bench_close, 200)
-    above_200_ema = bench_close.iloc[-1] > ema200_bench.iloc[-1]
+    bench_close  = bench_prices.dropna() if bench_prices is not None else pd.Series(dtype=float)
+    bench_data_ok = len(bench_close) >= 201    # need at least 200 bars for EMA
+
+    if bench_data_ok:
+        ema200_bench  = compute_ema(bench_close, 200)
+        above_200_ema = bool(bench_close.iloc[-1] > ema200_bench.iloc[-1])
+    else:
+        ema200_bench  = bench_close  # empty / stub
+        above_200_ema = True         # default to permissive when data missing
 
     # Weekly supertrend on benchmark
     bench_weekly_close = bench_weekly["Close"].dropna() if bench_weekly is not None and "Close" in bench_weekly.columns else pd.Series()
@@ -334,12 +348,17 @@ def run_momentum_screen(
     else:
         regime = "RISK OFF"
 
+    # Fall back gracefully if bench data was unavailable
+    if not bench_data_ok:
+        regime = "NEUTRAL"
+
     regime_info = {
-        "regime": regime,
-        "bench_close": bench_close.iloc[-1],
-        "bench_ema200": ema200_bench.iloc[-1],
-        "above_200_ema": above_200_ema,
+        "regime":           regime,
+        "bench_close":      bench_close.iloc[-1] if bench_data_ok else None,
+        "bench_ema200":     ema200_bench.iloc[-1] if bench_data_ok and len(ema200_bench) > 0 else None,
+        "above_200_ema":    above_200_ema,
         "above_supertrend": above_supertrend,
+        "bench_data_ok":    bench_data_ok,
     }
 
     # ── Per-stock calculations ─────────────────────────────────────────────────
@@ -614,22 +633,47 @@ if prices_df.empty:
     st.error("Price download failed.")
     st.stop()
 
-# Benchmark prices
+# Benchmark prices — with fallback chain
 with st.spinner("Fetching benchmark data..."):
     import datetime
-    end_d = datetime.date.today()
+    end_d   = datetime.date.today()
     start_d = end_d - datetime.timedelta(days=period_days_val + 100)
-    bench_raw = yf.download(bench_yf, start=str(start_d), end=str(end_d),
-                            auto_adjust=True, progress=False)
-    bench_weekly = yf.download(bench_yf, start=str(start_d), end=str(end_d),
-                               interval="1wk", auto_adjust=True, progress=False)
-    if isinstance(bench_raw.columns, pd.MultiIndex):
-        bench_close_series = bench_raw["Close"].squeeze()
-    else:
-        bench_close_series = bench_raw["Close"]
 
-    if isinstance(bench_weekly.columns, pd.MultiIndex):
-        bench_weekly = bench_weekly.droplevel(1, axis=1)
+    def _download_bench(ticker, start, end, interval="1d"):
+        """Download a single ticker; return empty DataFrame on any failure."""
+        try:
+            df = yf.download(ticker, start=str(start), end=str(end),
+                             interval=interval, auto_adjust=True, progress=False)
+            if isinstance(df.columns, pd.MultiIndex):
+                df = df.droplevel(1, axis=1)
+            return df
+        except Exception:
+            return pd.DataFrame()
+
+    bench_raw     = pd.DataFrame()
+    bench_weekly  = pd.DataFrame()
+    bench_used    = bench_yf
+    fallback_list = BENCHMARK_FALLBACKS.get(bench_yf, [bench_yf])
+
+    for candidate in fallback_list:
+        raw = _download_bench(candidate, start_d, end_d, "1d")
+        if not raw.empty and "Close" in raw.columns and len(raw) >= 50:
+            bench_raw    = raw
+            bench_weekly = _download_bench(candidate, start_d, end_d, "1wk")
+            bench_used   = candidate
+            break
+
+    if bench_raw.empty or "Close" not in bench_raw.columns:
+        st.warning(
+            f"⚠️ Benchmark data unavailable for **{benchmark}** (tried: {', '.join(fallback_list)}). "
+            "Regime filter will default to NEUTRAL — stock-level screening continues."
+        )
+        bench_close_series = pd.Series(dtype=float)
+        bench_weekly       = pd.DataFrame()
+    else:
+        bench_close_series = bench_raw["Close"].squeeze().dropna()
+        if bench_used != bench_yf:
+            st.info(f"ℹ️ Benchmark fallback: using **{bench_used}** as proxy for {benchmark}.")
 
 st.success(f"✓ Prices loaded: {prices_df.shape[1]} stocks × {len(prices_df)} days")
 
@@ -657,15 +701,27 @@ elif regime == "NEUTRAL":
 else:
     badge = '<span class="regime-off">🚫 RISK OFF — No New Positions</span>'
 
-rc1, rc2, rc3 = st.columns([2, 1, 1])
+rc1, rc2, rc3, rc4 = st.columns([2, 1, 1, 1])
 with rc1:
-    st.markdown(badge, unsafe_allow_html=True)
+    if not regime_info["bench_data_ok"]:
+        st.markdown(badge + ' <span style="font-family:DM Mono,monospace;font-size:0.7rem;color:#64748b">(no bench data — defaulted)</span>', unsafe_allow_html=True)
+    else:
+        st.markdown(badge, unsafe_allow_html=True)
 with rc2:
     ema_color = "#4ade80" if regime_info["above_200_ema"] else "#f87171"
-    st.markdown(f'<div style="font-family:DM Mono,monospace;font-size:0.78rem;color:#94a3b8">200 EMA: <span style="color:{ema_color}">{"ABOVE" if regime_info["above_200_ema"] else "BELOW"}</span></div>', unsafe_allow_html=True)
+    ema_label = "ABOVE" if regime_info["above_200_ema"] else "BELOW"
+    if not regime_info["bench_data_ok"]: ema_label = "N/A"; ema_color = "#475569"
+    st.markdown(f'<div style="font-family:DM Mono,monospace;font-size:0.78rem;color:#94a3b8">200 EMA: <span style="color:{ema_color}">{ema_label}</span></div>', unsafe_allow_html=True)
 with rc3:
     st_color = "#4ade80" if regime_info["above_supertrend"] else "#f87171"
-    st.markdown(f'<div style="font-family:DM Mono,monospace;font-size:0.78rem;color:#94a3b8">Supertrend: <span style="color:{st_color}">{"ABOVE" if regime_info["above_supertrend"] else "BELOW"}</span></div>', unsafe_allow_html=True)
+    st_label = "ABOVE" if regime_info["above_supertrend"] else "BELOW"
+    if not regime_info["bench_data_ok"]: st_label = "N/A"; st_color = "#475569"
+    st.markdown(f'<div style="font-family:DM Mono,monospace;font-size:0.78rem;color:#94a3b8">Supertrend: <span style="color:{st_color}">{st_label}</span></div>', unsafe_allow_html=True)
+with rc4:
+    if regime_info["bench_close"] is not None:
+        st.markdown(f'<div style="font-family:DM Mono,monospace;font-size:0.78rem;color:#94a3b8">Bench: <span style="color:#f8fafc">{regime_info["bench_close"]:,.2f}</span></div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div style="font-family:DM Mono,monospace;font-size:0.78rem;color:#475569">Bench: N/A</div>', unsafe_allow_html=True)
 
 if regime_info["regime"] == "RISK OFF":
     st.markdown('<div class="warn-box">⚠️ Market is in Risk OFF regime. System recommends no new positions.</div>', unsafe_allow_html=True)
@@ -708,7 +764,12 @@ ticker_to_name = dict(zip(constituents["YF_Ticker"], constituents["Company"]))
 results_df["Company"] = results_df["Ticker"].map(ticker_to_name).fillna(results_df["Ticker"])
 results_df["Symbol"] = results_df["Ticker"].str.replace(".NS", "", regex=False)
 
-display_df = results_df[["Symbol", "Company", "Zone", "FinalRank",
+# TradingView link: NSE:SYMBOL
+results_df["TV"] = results_df["Symbol"].apply(
+    lambda s: f"https://www.tradingview.com/chart/?symbol=NSE%3A{s}"
+)
+
+display_df = results_df[["Symbol", "Company", "TV", "Zone", "FinalRank",
                           "MomScore", "UPI", "Sharpe",
                           "Retracement%", "52W_High",
                           "RS252", "RS88", "CompositeRS",
@@ -722,6 +783,7 @@ display_df = display_df.rename(columns={
     "Sharpe":       "Sharpe",
     "Retracement%": "Retracement%",
     "52W_High":     "52W High",
+    "TV":           "Chart",
 })
 
 display_limit = len(results_df) if show_all else top_n
@@ -761,49 +823,66 @@ def render_table(df):
         "Vol_3M%":      "{:.2f}%",
         "Close":        "₹{:.2f}",
     }
-    # Only format columns that exist in this slice
     fmt = {k: v for k, v in fmt.items() if k in df.columns}
 
-    # Colour Retracement%: green closer to 0, red further negative
     def color_retracement(val):
         try:
             v = float(val)
-            if v >= -5:   return "color: #4ade80; font-weight:600"
+            if v >= -5:    return "color: #4ade80; font-weight:600"
             elif v >= -15: return "color: #facc15"
             else:          return "color: #f87171"
         except: return ""
 
-    # Colour UPI: higher = greener
     def color_upi(val):
         try:
             v = float(val)
-            if v >= 1.5:  return "color: #4ade80; font-weight:600"
+            if v >= 1.5:   return "color: #4ade80; font-weight:600"
             elif v >= 0.5: return "color: #facc15"
             else:          return "color: #fb923c"
         except: return ""
 
-    # Colour Sharpe: higher = greener
     def color_sharpe(val):
         try:
             v = float(val)
             if v >= 1.0:   return "color: #4ade80; font-weight:600"
-            elif v >= 0.0:  return "color: #facc15"
-            else:           return "color: #f87171"
+            elif v >= 0.0: return "color: #facc15"
+            else:          return "color: #f87171"
         except: return ""
 
-    styled = df.style.applymap(style_zone, subset=["Zone"])
+    # Work on a copy; st.dataframe with column_config handles the Chart URL column
+    # natively as a clickable link — no Styler support needed for that column.
+    has_chart = "Chart" in df.columns
+    data_cols = [c for c in df.columns if c != "Chart"]
+    df_data   = df[data_cols].copy()
 
-    if "Retracement%" in df.columns:
+    styled = df_data.style.applymap(style_zone, subset=["Zone"])
+    if "Retracement%" in data_cols:
         styled = styled.applymap(color_retracement, subset=["Retracement%"])
-    if "UPI" in df.columns:
+    if "UPI" in data_cols:
         styled = styled.applymap(color_upi, subset=["UPI"])
-    if "Sharpe" in df.columns:
+    if "Sharpe" in data_cols:
         styled = styled.applymap(color_sharpe, subset=["Sharpe"])
+    styled = (
+        styled
+        .format(fmt, na_rep="—")
+        .background_gradient(subset=["Rank"], cmap="RdYlGn", vmin=0, vmax=100)
+        .set_properties(**{"font-family": "DM Mono, monospace", "font-size": "12px"})
+    )
 
-    styled = styled.format(fmt, na_rep="—") \
-                   .background_gradient(subset=["Rank"], cmap="RdYlGn", vmin=0, vmax=100) \
-                   .set_properties(**{"font-family": "DM Mono, monospace", "font-size": "12px"})
-    st.dataframe(styled, use_container_width=True, height=520)
+    # Inject Chart URL back into the underlying DataFrame so column_config works
+    if has_chart:
+        styled.data["Chart"] = df["Chart"].values
+
+    col_cfg = {}
+    if has_chart:
+        col_cfg["Chart"] = st.column_config.LinkColumn(
+            "📈 Chart",
+            help="Open chart on TradingView",
+            display_text="TradingView ↗",
+            width="small",
+        )
+
+    st.dataframe(styled, column_config=col_cfg, use_container_width=True, height=520)
 
 with tab1:
     top_df = display_df.head(top_n)
