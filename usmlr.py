@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import requests
+import os
+from pathlib import Path
 from io import StringIO
 import warnings
 warnings.filterwarnings("ignore")
@@ -82,11 +84,14 @@ st.markdown("""
 
 # ─── CONSTANTS ────────────────────────────────────────────────────────────────
 INDEX_UNIVERSES = {
-    "S&P 500":         "sp500",
-    "DJIA 30":         "djia30",
-    "Nasdaq 100":      "nasdaq100",
-    "S&P 400 Midcap":  "sp400",
-    "Russell 1000":    "russell1000",
+    "S&P 500":            "sp500",
+    "DJIA 30":            "djia30",
+    "Nasdaq 100":         "nasdaq100",
+    "S&P 400 Midcap":     "sp400",
+    "Russell 1000":       "russell1000",
+    "NYSE (All Common)":  "nyse_all",
+    "NASDAQ (All Common)":"nasdaq_all",
+    "All US Common":      "all_us",
 }
 
 # DJIA 30 — stable hardcoded list (update periodically)
@@ -196,13 +201,107 @@ def fetch_russell1000_constituents() -> pd.DataFrame:
 def fetch_djia30_constituents() -> pd.DataFrame:
     return pd.DataFrame({"Symbol": DJIA_30, "Company": DJIA_30, "Sector": ""})
 
+
+# ── Bundled exchange CSV universes ────────────────────────────────────────────
+# Commit nyse-listed.csv and usstocks.csv (NASDAQ Trader schema) to the repo root.
+import re as _re
+_DROP_NAME = _re.compile(
+    r'\b(?:ETF|ETN|Fund|Warrant|Units?|Depositary|Preferred|Notes?|Rights?|Trust|'
+    r'Index|Bond|when issued|Tender|Debenture|Subordinat)\b', _re.I)
+_KEEP_NAME = _re.compile(
+    r'(?:Common Stock|Ordinary Shares?|Common Shares?|Class [A-D]|American Depositary)', _re.I)
+
+def _find_csv(*names) -> Path | None:
+    try:
+        here = Path(__file__).parent
+    except Exception:
+        here = Path(".")
+    search_dirs = [here, Path.cwd(), here / "data", Path("data"), Path("/mnt/user-data/uploads")]
+    for d in search_dirs:
+        for n in names:
+            p = d / n
+            try:
+                if p.exists():
+                    return p
+            except Exception:
+                continue
+    return None
+
+def _normalize_nyse_symbol(sym: str):
+    """Keep common/class shares; drop units/warrants/rights/preferred. .A→-A for yfinance."""
+    if not _re.match(r'^[A-Za-z]+(\.[A-Za-z]{1,2})?$', sym):
+        return None
+    if '.' in sym:
+        base, suf = sym.split('.', 1)
+        return f"{base}-{suf.upper()}" if suf.upper() in {'A', 'B', 'C', 'D'} else None
+    return sym
+
+@st.cache_data(ttl=86400)
+def fetch_nyse_all() -> pd.DataFrame:
+    p = _find_csv("nyse-listed.csv", "nyse_listed.csv")
+    if p is None:
+        st.error("nyse-listed.csv not found in repo. Commit it to the app root.")
+        return pd.DataFrame()
+    try:
+        df = pd.read_csv(p)
+        df.columns = [c.strip() for c in df.columns]
+        sym_col  = next((c for c in df.columns if "symbol" in c.lower()), df.columns[0])
+        name_col = next((c for c in df.columns if "company" in c.lower() or "name" in c.lower()), None)
+        out = pd.DataFrame()
+        out["Symbol"]  = df[sym_col].astype(str).str.strip()
+        out["Company"] = df[name_col].astype(str).str.strip() if name_col else out["Symbol"]
+        out = out[out["Company"].str.contains(_KEEP_NAME) & ~out["Company"].str.contains(_DROP_NAME)]
+        out["YF"] = out["Symbol"].map(_normalize_nyse_symbol)
+        out = out[out["YF"].notna()].copy()
+        out["Symbol"], out["Sector"] = out["YF"], ""
+        return out[["Symbol", "Company", "Sector"]].drop_duplicates("Symbol").reset_index(drop=True)
+    except Exception as e:
+        st.error(f"NYSE CSV parse failed: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=86400)
+def fetch_nasdaq_all() -> pd.DataFrame:
+    p = _find_csv("usstocks.csv", "nasdaqlisted.csv", "nasdaq-listed.csv")
+    if p is None:
+        st.error("usstocks.csv not found in repo. Commit it to the app root.")
+        return pd.DataFrame()
+    try:
+        df = pd.read_csv(p)
+        df.columns = [c.strip() for c in df.columns]
+        if "Test Issue" in df.columns:
+            df = df[df["Test Issue"].astype(str).str.strip().str.upper() == "N"]
+        sym_col  = next((c for c in df.columns if c.lower() == "symbol"), df.columns[0])
+        name_col = next((c for c in df.columns if "security name" in c.lower()), None) \
+                   or next((c for c in df.columns if "company" in c.lower() or "name" in c.lower()), None)
+        out = pd.DataFrame()
+        out["Symbol"]  = df[sym_col].astype(str).str.strip()
+        out["Company"] = df[name_col].astype(str).str.strip() if name_col else out["Symbol"]
+        out = out[out["Company"].str.contains(_KEEP_NAME) & ~out["Company"].str.contains(_DROP_NAME)]
+        out = out[out["Symbol"].str.match(r'^[A-Z]{1,5}$', na=False)]
+        out["Sector"] = ""
+        return out[["Symbol", "Company", "Sector"]].drop_duplicates("Symbol").reset_index(drop=True)
+    except Exception as e:
+        st.error(f"NASDAQ CSV parse failed: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=86400)
+def fetch_all_us() -> pd.DataFrame:
+    ny, nq = fetch_nyse_all(), fetch_nasdaq_all()
+    if ny.empty and nq.empty:
+        return pd.DataFrame()
+    return pd.concat([ny, nq], ignore_index=True).drop_duplicates("Symbol").reset_index(drop=True)
+
+
 def fetch_constituents(index_name: str) -> pd.DataFrame:
     dispatch = {
-        "S&P 500":        fetch_sp500_constituents,
-        "DJIA 30":        fetch_djia30_constituents,
-        "Nasdaq 100":     fetch_nasdaq100_constituents,
-        "S&P 400 Midcap": fetch_sp400_constituents,
-        "Russell 1000":   fetch_russell1000_constituents,
+        "S&P 500":             fetch_sp500_constituents,
+        "DJIA 30":             fetch_djia30_constituents,
+        "Nasdaq 100":          fetch_nasdaq100_constituents,
+        "S&P 400 Midcap":      fetch_sp400_constituents,
+        "Russell 1000":        fetch_russell1000_constituents,
+        "NYSE (All Common)":   fetch_nyse_all,
+        "NASDAQ (All Common)": fetch_nasdaq_all,
+        "All US Common":       fetch_all_us,
     }
     df = dispatch.get(index_name, fetch_sp500_constituents)()
     if not df.empty:
@@ -210,26 +309,47 @@ def fetch_constituents(index_name: str) -> pd.DataFrame:
     return df
 
 
-@st.cache_data(ttl=3600)
-def fetch_ohlcv(tickers: tuple, period_days: int) -> dict:
-    """Download OHLCV; returns dict of High/Low/Close DataFrames (Close used for screen, H/L for ADR)."""
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_ohlcv(tickers: tuple, period_days: int, chunk: int = 150) -> dict:
+    """Batched OHLCV download — chunks the request so large (1000s) universes
+    survive yfinance rate limits and partial failures. Returns High/Low/Close frames."""
     import datetime
     end   = datetime.date.today()
-    start = end - datetime.timedelta(days=period_days + 450)  # warmup for long EMAs
-    try:
-        raw = yf.download(list(tickers), start=str(start), end=str(end),
-                          auto_adjust=True, progress=False, threads=True)
+    start = end - datetime.timedelta(days=period_days + 450)   # warmup for 252d RSI / 200 EMA
+    tickers = list(tickers)
+    highs, lows, closes = [], [], []
+
+    for i in range(0, len(tickers), chunk):
+        batch = tickers[i:i + chunk]
+        try:
+            raw = yf.download(batch, start=str(start), end=str(end),
+                              auto_adjust=True, progress=False, threads=True)
+        except Exception:
+            continue
+        if raw is None or raw.empty:
+            continue
         if isinstance(raw.columns, pd.MultiIndex):
-            return {"High": raw["High"], "Low": raw["Low"],
-                    "Close": raw["Close"].dropna(how="all")}
-        return {
-            "High":  raw[["High"]]  if "High"  in raw.columns else pd.DataFrame(),
-            "Low":   raw[["Low"]]   if "Low"   in raw.columns else pd.DataFrame(),
-            "Close": (raw[["Close"]] if "Close" in raw.columns else raw).dropna(how="all"),
-        }
-    except Exception as e:
-        st.error(f"Price download error: {e}")
+            for fld, bucket in (("High", highs), ("Low", lows), ("Close", closes)):
+                if fld in raw.columns.get_level_values(0):
+                    bucket.append(raw[fld])
+        else:
+            # single surviving ticker in the batch → flat columns
+            tkr = batch[0]
+            for fld, bucket in (("High", highs), ("Low", lows), ("Close", closes)):
+                if fld in raw.columns:
+                    bucket.append(raw[[fld]].rename(columns={fld: tkr}))
+
+    if not closes:
         return {"High": pd.DataFrame(), "Low": pd.DataFrame(), "Close": pd.DataFrame()}
+
+    def _join(frames):
+        if not frames:
+            return pd.DataFrame()
+        out = pd.concat(frames, axis=1)
+        return out.loc[:, ~out.columns.duplicated()]
+
+    H, L, C = _join(highs), _join(lows), _join(closes)
+    return {"High": H, "Low": L, "Close": C.dropna(how="all")}
 
 
 @st.cache_data(ttl=1800)
@@ -573,6 +693,10 @@ with st.sidebar:
 
     st.markdown('<div class="section-title">Data</div>', unsafe_allow_html=True)
     period = st.selectbox("Period", ["1y", "2y", "3y", "5y"], index=1)
+    universe_cap = st.slider("Max Tickers to Scan", 50, 4200, 500, 50,
+        help="Caps how many symbols are downloaded (alphabetical). Index universes are small; "
+             "raise this for full NYSE/NASDAQ scans — note large scans take several minutes and "
+             "may hit Yahoo rate limits.")
 
     st.markdown('<div class="section-title">Sort By</div>', unsafe_allow_html=True)
     sort_by = st.selectbox(
@@ -689,7 +813,18 @@ if not run_btn:
     ℹ Configure parameters in the sidebar and click <strong>▶ Run Screen</strong>.
     v2.0 upgrades: Composite ranking · RS filter · CBOE VIX gate · 63-day DD filter ·
     inverse-vol sizing · correlation dedup · vectorised Supertrend · ADR&gt;3% column.
-    Constituents from Wikipedia (S&P 500 / Nasdaq 100) & iShares; prices via Yahoo Finance.
+    Constituents from Wikipedia (S&P 500 / Nasdaq 100) & iShares; full NYSE/NASDAQ from bundled CSVs; prices via Yahoo Finance.
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="warn-box">
+    📂 <strong>Full-exchange universes:</strong> commit <code>nyse-listed.csv</code> and
+    <code>usstocks.csv</code> to the repo root. They feed the NYSE / NASDAQ / All-US options
+    (~4,000 common-stock names after ETF/unit/warrant/preferred filtering). Use the
+    <strong>Max Tickers to Scan</strong> slider to keep runtime sane — full scans take minutes
+    and can hit Yahoo rate limits. The index universes (S&amp;P 500, Nasdaq 100) need
+    <code>lxml</code> in requirements.txt for Wikipedia parsing.
     </div>
     """, unsafe_allow_html=True)
 
@@ -759,6 +894,13 @@ if constituents.empty:
 
 st.success(f"✓ Loaded {len(constituents)} stocks from {indices_universe}")
 
+# Apply universe cap (alphabetical) for large exchange-wide scans
+constituents = constituents.sort_values("Symbol").reset_index(drop=True)
+if len(constituents) > universe_cap:
+    st.info(f"ℹ️ Universe capped to first {universe_cap} of {len(constituents)} symbols "
+            f"(alphabetical). Raise 'Max Tickers to Scan' to widen.")
+    constituents = constituents.head(universe_cap).reset_index(drop=True)
+
 tickers_yf      = tuple(constituents["YF_Ticker"].tolist())
 bench_yf        = BENCHMARK_TICKERS[benchmark]
 period_days_val = PERIOD_DAYS[period]
@@ -786,8 +928,9 @@ if use_vix_gate:
     else:
         st.markdown('<div class="info-box">ℹ VIX unavailable — gate shown as N/A.</div>', unsafe_allow_html=True)
 
-# ── Stock OHLCV download ──────────────────────────────────────────────────────
-with st.spinner(f"Downloading {len(tickers_yf)} stock prices ({period})..."):
+# ── Stock OHLCV download (batched) ────────────────────────────────────────────
+with st.spinner(f"Downloading {len(tickers_yf)} stock prices in batches ({period})... "
+                f"large universes may take a few minutes."):
     ohlcv     = fetch_ohlcv(tickers_yf, period_days_val)
     prices_df = ohlcv.get("Close", pd.DataFrame())
     high_df   = ohlcv.get("High",  pd.DataFrame())
