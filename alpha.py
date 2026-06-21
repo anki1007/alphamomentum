@@ -164,7 +164,7 @@ INDEX_URLS = {
 BENCHMARK_TICKERS = {
     "Nifty 50 (NSEI)":  "^NSEI",
     "Nifty 200 (CNX200)":"^CNX200",
-    "Nifty 500 (CNX500)":"^CNX500",
+    "Nifty 500 (CNX500)":"^CRSLDX",
 }
 
 PERIOD_DAYS = {"1y": 365, "2y": 730, "3y": 1095, "5y": 1825}
