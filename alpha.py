@@ -157,7 +157,7 @@ INDEX_URLS = {
     "Nifty Midcap 150":  "https://nsearchives.nseindia.com/content/indices/ind_niftymidcap150list.csv",
     "Nifty Smallcap 250":"https://www.niftyindices.com/IndexConstituent/ind_niftysmallcap250list.csv",
     "Nifty MidSmallcap 400":"https://www.niftyindices.com/IndexConstituent/ind_niftymidsmallcap400list.csv",
-    "Nifty Microcap 250":"https://nseindex-prod-app.azurewebsites.net/IndexConstituent/ind_niftymicrocap250_list.csv",
+    "Nifty Microcap 250":"https://nsearchives.nseindia.com/content/indices/ind_niftymicrocap250_list.csv",
     "Nifty 500":         "https://niftyindices.com/IndexConstituent/ind_nifty500list.csv",
 }
 
