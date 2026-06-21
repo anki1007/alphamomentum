@@ -214,7 +214,8 @@ def fetch_constituents(index_name: str) -> pd.DataFrame:
 def fetch_prices(tickers: list, period_days: int) -> pd.DataFrame:
     import datetime
     end = datetime.date.today()
-    start = end - datetime.timedelta(days=period_days + 100)
+    # Extra buffer so RSI(252) / 200-EMA have warmup even on the 1y view
+    start = end - datetime.timedelta(days=period_days + 450)
     try:
         raw = yf.download(
             tickers, start=str(start), end=str(end),
@@ -284,22 +285,30 @@ def compute_supertrend(high, low, close, period=7, multiplier=2.5):
     return supertrend, direction
 
 
-def compute_rs_rating(returns_df: pd.Series, all_returns: pd.DataFrame, window: int) -> pd.Series:
-    """Percentile rank of stock return vs universe over window."""
-    stock_ret = returns_df.pct_change(window).iloc[-1]
-    universe_ret = all_returns.pct_change(window).iloc[-1].dropna()
-    if len(universe_ret) < 2:
-        return np.nan
-    rank = (universe_ret < stock_ret).sum() / len(universe_ret) * 100
-    return rank
+def compute_rsi(series: pd.Series, period: int) -> pd.Series:
+    """Wilder's Relative Strength Index (RSI) over `period` bars."""
+    delta = series.diff()
+    gain  = delta.clip(lower=0.0)
+    loss  = (-delta).clip(lower=0.0)
+    # Wilder smoothing == EWM with alpha = 1/period
+    avg_gain = gain.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean()
+    avg_loss = loss.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean()
+    rs  = avg_gain / avg_loss.replace(0, np.nan)
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+    # If avg_loss is 0 (only gains), RSI = 100
+    rsi = rsi.where(avg_loss != 0, 100.0)
+    return rsi
 
 
 def run_momentum_screen(
     prices: pd.DataFrame,
     bench_prices: pd.Series,
     bench_weekly: pd.DataFrame,
-    use_composite_rs: bool,
-    composite_rs_threshold: float,
+    rsi252_min: float,
+    rsi88_min: float,
+    st_period: int,
+    st_multiplier: float,
+    use_supertrend: bool,
     liquidity_threshold: float,
     volume_df: pd.DataFrame | None,
     period_days: int,
@@ -307,12 +316,6 @@ def run_momentum_screen(
 
     results = []
     tickers = [c for c in prices.columns]
-
-    # Pre-compute universe returns for RS
-    ret_252 = prices.pct_change(252).iloc[-1]
-    ret_88  = prices.pct_change(88).iloc[-1]
-    universe_ret_252 = ret_252.dropna()
-    universe_ret_88  = ret_88.dropna()
 
     # ── Market Regime ──────────────────────────────────────────────────────────
     bench_close  = bench_prices.dropna() if bench_prices is not None else pd.Series(dtype=float)
@@ -325,41 +328,67 @@ def run_momentum_screen(
         ema200_bench  = bench_close  # empty / stub
         above_200_ema = True         # default to permissive when data missing
 
-    # Weekly supertrend on benchmark
+    # Weekly supertrend on benchmark (configurable period / ATR multiplier)
     bench_weekly_close = bench_weekly["Close"].dropna() if bench_weekly is not None and "Close" in bench_weekly.columns else pd.Series()
     above_supertrend = False
+    supertrend_ok = False
+    bench_supertrend = None
     if len(bench_weekly_close) > 30:
         try:
             w_h = bench_weekly["High"].dropna()
             w_l = bench_weekly["Low"].dropna()
             w_c = bench_weekly["Close"].dropna()
-            st_vals, st_dir = compute_supertrend(w_h, w_l, w_c, period=7, multiplier=2.5)
+            st_vals, st_dir = compute_supertrend(w_h, w_l, w_c,
+                                                 period=st_period, multiplier=st_multiplier)
             if len(st_vals.dropna()) > 0:
                 last_close = w_c.iloc[-1]
                 last_st = st_vals.dropna().iloc[-1]
-                above_supertrend = last_close > last_st
+                above_supertrend = bool(last_close > last_st)
+                bench_supertrend = float(last_st)
+                supertrend_ok = True
         except Exception:
             above_supertrend = False
 
-    if above_200_ema and above_supertrend:
+    # If the Supertrend filter is switched off, treat it as satisfied
+    if not use_supertrend:
+        above_supertrend = True
+
+    # ── Negative regime gate ─────────────────────────────────────────────────
+    # When the Supertrend filter is ON and the benchmark closed BELOW its weekly
+    # Supertrend, the index is in a negative regime → do not scan stocks.
+    negative_regime = bool(
+        use_supertrend and supertrend_ok and bench_data_ok and not above_supertrend
+    )
+
+    if not bench_data_ok:
+        regime = "NEUTRAL"
+    elif negative_regime:
+        regime = "RISK OFF"
+    elif above_200_ema and above_supertrend:
         regime = "RISK ON"
     elif above_200_ema and not above_supertrend:
         regime = "NEUTRAL"
     else:
         regime = "RISK OFF"
 
-    # Fall back gracefully if bench data was unavailable
-    if not bench_data_ok:
-        regime = "NEUTRAL"
-
     regime_info = {
         "regime":           regime,
         "bench_close":      bench_close.iloc[-1] if bench_data_ok else None,
         "bench_ema200":     ema200_bench.iloc[-1] if bench_data_ok and len(ema200_bench) > 0 else None,
+        "bench_supertrend": bench_supertrend,
         "above_200_ema":    above_200_ema,
         "above_supertrend": above_supertrend,
         "bench_data_ok":    bench_data_ok,
+        "supertrend_ok":    supertrend_ok,
+        "use_supertrend":   use_supertrend,
+        "negative_regime":  negative_regime,
+        "st_period":        st_period,
+        "st_multiplier":    st_multiplier,
     }
+
+    # Hard stop: negative regime → return no stocks, display layer shows the index
+    if negative_regime:
+        return pd.DataFrame(), regime_info
 
     # ── Per-stock calculations ─────────────────────────────────────────────────
     for ticker in tickers:
@@ -380,20 +409,14 @@ def run_momentum_screen(
             if not (above_ema200 and ema50_gt_200):
                 continue
 
-            # Relative Strength
-            if len(universe_ret_252) < 5 or len(universe_ret_88) < 5:
-                rs252 = rs88 = 50.0
-            else:
-                rs252 = (universe_ret_252 < ret_252.get(ticker, np.nan)).sum() / len(universe_ret_252) * 100
-                rs88  = (universe_ret_88  < ret_88.get(ticker, np.nan)).sum()  / len(universe_ret_88)  * 100
+            # ── RSI (Wilder) — 252-day and 88-day ────────────────────────────
+            rsi252 = compute_rsi(s, 252).iloc[-1]
+            rsi88  = compute_rsi(s, 88).iloc[-1]
 
-            if use_composite_rs:
-                composite = 0.60 * rs252 + 0.40 * rs88
-                if composite <= composite_rs_threshold:
-                    continue
-            else:
-                if rs252 <= 50 or rs88 <= 50:
-                    continue
+            if pd.isna(rsi252) or pd.isna(rsi88):
+                continue
+            if rsi252 < rsi252_min or rsi88 < rsi88_min:
+                continue
 
             # Returns (skip last month = 21 trading days)
             s_lagged = s.iloc[:-21]
@@ -417,35 +440,33 @@ def run_momentum_screen(
             if vol_3m == 0:
                 continue
 
+            # Stock Composite Momentum Score = WeightedMomentum / 3M Volatility
             mom_score = weighted_mom / vol_3m
 
-            # ── Sharpe Ratio (annualised, risk-free = 6.5% INR) ──────────────
-            rf_daily = 0.065 / 252
+            # ── Sharpe Ratio (annualised, risk-free = 6.5% INR) × 100 ─────────
             ann_ret  = (s.iloc[-1] / s.iloc[-252] - 1) if len(s) >= 252 else np.nan
             excess   = ann_ret - 0.065 if not pd.isna(ann_ret) else np.nan
-            sharpe   = round(excess / (vol_3m / 100), 3) if vol_3m > 0 and not pd.isna(excess) else 0.0
+            sharpe   = round((excess / (vol_3m / 100)) * 100, 2) if vol_3m > 0 and not pd.isna(excess) else 0.0
 
             # ── UPI — Ulcer Performance Index ────────────────────────────────
-            # UPI = Annualised Return / Ulcer Index
-            # Ulcer Index = sqrt(mean(drawdown_pct^2)) over lookback
+            # UPI = Annualised Return / Ulcer Index ; Ulcer = sqrt(mean(drawdown%^2))
             s_252 = s.tail(252)
             rolling_max = s_252.cummax()
-            drawdown_pct = ((s_252 - rolling_max) / rolling_max) * 100   # negative values
+            drawdown_pct = ((s_252 - rolling_max) / rolling_max) * 100   # negative
             ulcer_index  = np.sqrt((drawdown_pct ** 2).mean())
             upi = round((ann_ret * 100) / ulcer_index, 4) if ulcer_index > 0 and not pd.isna(ann_ret) else 0.0
 
             # ── % Retracement from 52-Week High ──────────────────────────────
             high_52w = s.tail(252).max()
-            retracement_pct = round((close_last - high_52w) / high_52w * 100, 2)  # negative = below ATH
+            retracement_pct = round((close_last - high_52w) / high_52w * 100, 2)  # negative
 
             results.append({
                 "Ticker": ticker,
                 "Close": round(close_last, 2),
                 "EMA50":  round(ema50, 2),
                 "EMA200": round(ema200, 2),
-                "RS252":  round(rs252, 1),
-                "RS88":   round(rs88, 1),
-                "CompositeRS": round(0.60*rs252 + 0.40*rs88, 1),
+                "RSI252": round(rsi252, 1),
+                "RSI88":  round(rsi88, 1),
                 "Ret_9M%": round(ret_9m, 2),
                 "Ret_6M%": round(ret_6m, 2),
                 "Ret_3M%": round(ret_3m, 2),
@@ -521,13 +542,31 @@ with st.sidebar:
     }
 
     st.markdown('<hr class="sidebar-divider">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Optional Filters</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">RSI Filters</div>', unsafe_allow_html=True)
 
-    use_composite = st.checkbox("Use Composite RS Filter", value=False,
-        help="0.60×RS252 + 0.40×RS88 > threshold (replaces individual RS50 filters)")
-    composite_threshold = 60.0
-    if use_composite:
-        composite_threshold = st.slider("Composite RS Threshold", 50, 80, 60, 1)
+    rsi252_min = st.slider("RSI (252-day) Minimum", 0, 100, 50, 1,
+        help="Wilder RSI over 252 trading days. Stock must be ≥ this value.")
+    rsi88_min  = st.slider("RSI (88-day) Minimum", 0, 100, 50, 1,
+        help="Wilder RSI over 88 trading days. Stock must be ≥ this value.")
+
+    st.markdown('<hr class="sidebar-divider">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Supertrend Filter</div>', unsafe_allow_html=True)
+
+    use_supertrend = st.checkbox("Enable Supertrend Regime Filter", value=True,
+        help="Weekly Supertrend on the selected benchmark gates the scan. "
+             "Below Supertrend = negative regime, no stocks shown.")
+    st_period = 1
+    st_multiplier = 2.5
+    if use_supertrend:
+        st_period     = st.slider("Supertrend ATR Period", 1, 30, 1, 1)
+        st_multiplier = st.slider("Supertrend ATR Multiplier", 0.5, 6.0, 2.5, 0.5)
+        st.markdown(
+            f'<div style="font-family:DM Mono,monospace;font-size:0.68rem;color:#475569;margin-top:-4px">'
+            f'On benchmark: <span style="color:#94a3b8">{benchmark.split("(")[0].strip()}</span> (weekly)</div>',
+            unsafe_allow_html=True)
+
+    st.markdown('<hr class="sidebar-divider">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Optional Filters</div>', unsafe_allow_html=True)
 
     use_liquidity = st.checkbox("Liquidity Filter (ADTV)", value=False,
         help="Require minimum average daily traded value")
@@ -579,7 +618,7 @@ if not run_btn:
         st.markdown("""
 **🔴 Market Regime**
 - CNX500 > 200 EMA
-- CNX500 Weekly > Supertrend(7,2.5)
+- CNX500 Weekly > Supertrend (configurable)
 - Risk ON / Neutral / Risk OFF
 
 **📈 Stock Trend**
@@ -588,10 +627,10 @@ if not run_btn:
 """)
     with c2:
         st.markdown("""
-**⚡ Relative Strength**
-- RS252 > 50th percentile
-- RS88 > 50th percentile
-- Optional: Composite RS > 60
+**⚡ RSI Filters**
+- RSI(252) ≥ slider (default 50)
+- RSI(88) ≥ slider (default 50)
+- Wilder RSI, both adjustable
 
 **📊 Momentum Score**
 - Weighted: 40%×9M + 30%×6M + 30%×3M
@@ -683,8 +722,11 @@ with st.spinner("Computing momentum scores and rankings..."):
         prices=prices_df,
         bench_prices=bench_close_series,
         bench_weekly=bench_weekly,
-        use_composite_rs=use_composite,
-        composite_rs_threshold=composite_threshold,
+        rsi252_min=rsi252_min,
+        rsi88_min=rsi88_min,
+        st_period=st_period,
+        st_multiplier=st_multiplier,
+        use_supertrend=use_supertrend,
         liquidity_threshold=liquidity_crore * 1e7,
         volume_df=None,
         period_days=period_days_val,
@@ -713,20 +755,61 @@ with rc2:
     if not regime_info["bench_data_ok"]: ema_label = "N/A"; ema_color = "#475569"
     st.markdown(f'<div style="font-family:DM Mono,monospace;font-size:0.78rem;color:#94a3b8">200 EMA: <span style="color:{ema_color}">{ema_label}</span></div>', unsafe_allow_html=True)
 with rc3:
-    st_color = "#4ade80" if regime_info["above_supertrend"] else "#f87171"
-    st_label = "ABOVE" if regime_info["above_supertrend"] else "BELOW"
-    if not regime_info["bench_data_ok"]: st_label = "N/A"; st_color = "#475569"
-    st.markdown(f'<div style="font-family:DM Mono,monospace;font-size:0.78rem;color:#94a3b8">Supertrend: <span style="color:{st_color}">{st_label}</span></div>', unsafe_allow_html=True)
+    if not regime_info.get("use_supertrend", True):
+        st.markdown('<div style="font-family:DM Mono,monospace;font-size:0.78rem;color:#94a3b8">Supertrend: <span style="color:#475569">OFF</span></div>', unsafe_allow_html=True)
+    else:
+        st_color = "#4ade80" if regime_info["above_supertrend"] else "#f87171"
+        st_label = "ABOVE" if regime_info["above_supertrend"] else "BELOW"
+        if not regime_info["bench_data_ok"] or not regime_info.get("supertrend_ok", False):
+            st_label = "N/A"; st_color = "#475569"
+        st.markdown(f'<div style="font-family:DM Mono,monospace;font-size:0.78rem;color:#94a3b8">ST({regime_info.get("st_period",1)},{regime_info.get("st_multiplier",2.5)}): <span style="color:{st_color}">{st_label}</span></div>', unsafe_allow_html=True)
 with rc4:
     if regime_info["bench_close"] is not None:
         st.markdown(f'<div style="font-family:DM Mono,monospace;font-size:0.78rem;color:#94a3b8">Bench: <span style="color:#f8fafc">{regime_info["bench_close"]:,.2f}</span></div>', unsafe_allow_html=True)
     else:
         st.markdown('<div style="font-family:DM Mono,monospace;font-size:0.78rem;color:#475569">Bench: N/A</div>', unsafe_allow_html=True)
 
+st.markdown("")
+
+# ─── NEGATIVE REGIME GATE ─────────────────────────────────────────────────────
+# Benchmark below its weekly Supertrend (filter on) → show the index, no scan.
+if regime_info.get("negative_regime", False):
+    bc  = regime_info.get("bench_close")
+    bst = regime_info.get("bench_supertrend")
+    p   = regime_info.get("st_period", 1)
+    m   = regime_info.get("st_multiplier", 2.5)
+    gap = ((bc - bst) / bst * 100) if (bc and bst) else None
+    st.markdown(f"""
+    <div style="background:linear-gradient(135deg,#2d0a0a 0%,#3d1010 100%);
+                border:1px solid #991b1b;border-radius:10px;padding:1.75rem 2rem;
+                margin-bottom:1rem;">
+      <div style="font-family:'DM Mono',monospace;font-size:1.25rem;color:#fca5a5;
+                  font-weight:600;margin-bottom:0.5rem;">🚫 NEGATIVE REGIME — Scan Halted</div>
+      <div style="font-family:'DM Mono',monospace;font-size:0.85rem;color:#f87171;line-height:1.7;">
+        <span style="color:#fecaca">{benchmark}</span> closed
+        <span style="color:#fca5a5;font-weight:600">BELOW</span> its weekly
+        Supertrend({p}, {m}). No new long positions — the index is in a downtrend.
+      </div>
+      <div style="display:flex;gap:2.5rem;margin-top:1rem;
+                  font-family:'DM Mono',monospace;font-size:0.82rem;">
+        <div><div style="color:#7f1d1d;font-size:0.68rem;text-transform:uppercase;letter-spacing:1px">Benchmark Close</div>
+             <div style="color:#fecaca;font-size:1.2rem;font-weight:600">{bc:,.2f}</div></div>
+        <div><div style="color:#7f1d1d;font-size:0.68rem;text-transform:uppercase;letter-spacing:1px">Weekly Supertrend</div>
+             <div style="color:#fca5a5;font-size:1.2rem;font-weight:600">{bst:,.2f}</div></div>
+        <div><div style="color:#7f1d1d;font-size:0.68rem;text-transform:uppercase;letter-spacing:1px">Distance</div>
+             <div style="color:#f87171;font-size:1.2rem;font-weight:600">{gap:+.2f}%</div></div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown(
+        '<div class="warn-box">📉 Per the strategy rules, stock scanning is disabled while the '
+        'benchmark is below its weekly Supertrend. Re-run once the index reclaims the Supertrend, '
+        'or disable the Supertrend filter in the sidebar to scan regardless.</div>',
+        unsafe_allow_html=True)
+    st.stop()
+
 if regime_info["regime"] == "RISK OFF":
     st.markdown('<div class="warn-box">⚠️ Market is in Risk OFF regime. System recommends no new positions.</div>', unsafe_allow_html=True)
-
-st.markdown("")
 
 if results_df.empty:
     st.warning("No stocks passed all filters. Try relaxing conditions or choose a different period.")
@@ -748,8 +831,8 @@ with m3:
 with m4:
     st.markdown(f'<div class="metric-card"><div class="label">🟠 Orange Zone</div><div class="value" style="color:#fb923c">{len(orange)}</div></div>', unsafe_allow_html=True)
 with m5:
-    avg_rs = results_df["CompositeRS"].mean()
-    st.markdown(f'<div class="metric-card"><div class="label">Avg Composite RS</div><div class="value" style="color:#a78bfa">{avg_rs:.1f}</div></div>', unsafe_allow_html=True)
+    avg_rsi = results_df["RSI252"].mean()
+    st.markdown(f'<div class="metric-card"><div class="label">Avg RSI(252)</div><div class="value" style="color:#a78bfa">{avg_rsi:.1f}</div></div>', unsafe_allow_html=True)
 
 st.markdown("")
 
@@ -764,26 +847,24 @@ ticker_to_name = dict(zip(constituents["YF_Ticker"], constituents["Company"]))
 results_df["Company"] = results_df["Ticker"].map(ticker_to_name).fillna(results_df["Ticker"])
 results_df["Symbol"] = results_df["Ticker"].str.replace(".NS", "", regex=False)
 
-# TradingView link: NSE:SYMBOL
-results_df["TV"] = results_df["Symbol"].apply(
+# TradingView URL embedded directly on the Symbol column (rendered as a link).
+# Raw symbol kept after NSE%3A so the regex display_text shows the clean ticker.
+from urllib.parse import quote as _quote
+results_df["SymbolLink"] = results_df["Symbol"].apply(
     lambda s: f"https://www.tradingview.com/chart/?symbol=NSE%3A{s}"
 )
 
-display_df = results_df[["Symbol", "Company", "TV", "Zone", "FinalRank",
+display_df = results_df[["SymbolLink", "Company", "Zone", "FinalRank",
                           "MomScore", "UPI", "Sharpe",
                           "Retracement%", "52W_High",
-                          "RS252", "RS88", "CompositeRS",
+                          "RSI252", "RSI88",
                           "Ret_9M%", "Ret_6M%", "Ret_3M%",
                           "Vol_3M%", "Close"]].copy()
 
 display_df = display_df.rename(columns={
+    "SymbolLink":   "Symbol",
     "FinalRank":    "Rank",
-    "MomScore":     "MomScore",
-    "UPI":          "UPI",
-    "Sharpe":       "Sharpe",
-    "Retracement%": "Retracement%",
     "52W_High":     "52W High",
-    "TV":           "Chart",
 })
 
 display_limit = len(results_df) if show_all else top_n
@@ -811,12 +892,11 @@ def render_table(df):
         "Rank":         "{:.1f}",
         "MomScore":     "{:.4f}",
         "UPI":          "{:.3f}",
-        "Sharpe":       "{:.3f}",
+        "Sharpe":       "{:.1f}",
         "Retracement%": "{:+.2f}%",
         "52W High":     "₹{:.2f}",
-        "RS252":        "{:.1f}",
-        "RS88":         "{:.1f}",
-        "CompositeRS":  "{:.1f}",
+        "RSI252":       "{:.1f}",
+        "RSI88":        "{:.1f}",
         "Ret_9M%":      "{:+.2f}%",
         "Ret_6M%":      "{:+.2f}%",
         "Ret_3M%":      "{:+.2f}%",
@@ -841,17 +921,25 @@ def render_table(df):
             else:          return "color: #fb923c"
         except: return ""
 
-    def color_sharpe(val):
+    def color_sharpe(val):   # Sharpe is ×100 scaled
         try:
             v = float(val)
-            if v >= 1.0:   return "color: #4ade80; font-weight:600"
+            if v >= 100:   return "color: #4ade80; font-weight:600"
             elif v >= 0.0: return "color: #facc15"
             else:          return "color: #f87171"
         except: return ""
 
-    # Build the Styler on the FULL frame (Chart included) so column positions
-    # stay consistent through render. Styling ops only touch named subsets; the
-    # Chart column rides along untouched and is read by column_config as a URL.
+    def color_rsi(val):
+        try:
+            v = float(val)
+            if v >= 70:   return "color: #4ade80; font-weight:600"
+            elif v >= 50: return "color: #facc15"
+            else:         return "color: #fb923c"
+        except: return ""
+
+    # Build the Styler on the FULL frame (Symbol URL included) so column
+    # positions stay consistent through render. Styling ops only touch named
+    # subsets; the Symbol URL column rides along and is read by column_config.
     styled = df.style.map(style_zone, subset=["Zone"])
     if "Retracement%" in df.columns:
         styled = styled.map(color_retracement, subset=["Retracement%"])
@@ -859,6 +947,9 @@ def render_table(df):
         styled = styled.map(color_upi, subset=["UPI"])
     if "Sharpe" in df.columns:
         styled = styled.map(color_sharpe, subset=["Sharpe"])
+    for rcol in ("RSI252", "RSI88"):
+        if rcol in df.columns:
+            styled = styled.map(color_rsi, subset=[rcol])
     styled = (
         styled
         .format(fmt, na_rep="—")
@@ -867,11 +958,11 @@ def render_table(df):
     )
 
     col_cfg = {}
-    if "Chart" in df.columns:
-        col_cfg["Chart"] = st.column_config.LinkColumn(
-            "📈 Chart",
-            help="Open chart on TradingView",
-            display_text="TradingView ↗",
+    if "Symbol" in df.columns:
+        col_cfg["Symbol"] = st.column_config.LinkColumn(
+            "Symbol",
+            help="Open on TradingView",
+            display_text=r"NSE%3A(.+)$",   # show clean ticker, link to TV
             width="small",
         )
 
@@ -922,14 +1013,14 @@ with chart_col2:
     top20 = results_df.head(20)[["Symbol", "MomScore"]].set_index("Symbol")
     st.bar_chart(top20)
 
-# RS scatter approximation with table
-st.markdown('<div class="section-title">Relative Strength Map — Top Candidates</div>', unsafe_allow_html=True)
-rs_df = display_df.head(top_n)[["Symbol", "RS252", "RS88", "CompositeRS", "UPI", "Sharpe", "Retracement%", "Zone"]].copy()
+# RSI / quality map (built from results_df so Symbol stays a plain ticker here)
+st.markdown('<div class="section-title">RSI &amp; Quality Map — Top Candidates</div>', unsafe_allow_html=True)
+rs_df = results_df.head(top_n)[["Symbol", "RSI252", "RSI88", "UPI", "Sharpe", "Retracement%", "Zone"]].copy()
 st.dataframe(
-    rs_df.style.background_gradient(subset=["RS252", "RS88", "CompositeRS"], cmap="RdYlGn", vmin=0, vmax=100)
+    rs_df.style.background_gradient(subset=["RSI252", "RSI88"], cmap="RdYlGn", vmin=0, vmax=100)
               .map(style_zone, subset=["Zone"])
-              .format({"RS252":"{:.1f}", "RS88":"{:.1f}", "CompositeRS":"{:.1f}",
-                       "UPI":"{:.3f}", "Sharpe":"{:.3f}", "Retracement%":"{:+.2f}%"}, na_rep="—")
+              .format({"RSI252":"{:.1f}", "RSI88":"{:.1f}",
+                       "UPI":"{:.3f}", "Sharpe":"{:.1f}", "Retracement%":"{:+.2f}%"}, na_rep="—")
               .set_properties(**{"font-family": "DM Mono, monospace", "font-size": "12px"}),
     width="stretch",
     height=300,
@@ -955,12 +1046,12 @@ with st.expander("📋 Entry / Exit Rules Reference"):
     with r1:
         st.markdown("""
 **Entry Rules** *(all must be true)*
-- CNX500 > 200 EMA  
-- CNX500 Weekly > Supertrend(1,2.5)  
+- Benchmark > 200 EMA  
+- Benchmark Weekly > Supertrend (configurable)  
 - Stock Close > 200 EMA  
 - 50 EMA > 200 EMA  
-- RS252 > 50  
-- RS88 > 50  
+- RSI(252) ≥ threshold  
+- RSI(88) ≥ threshold  
 - Rank ≥ 70  
 """)
     with r2:
