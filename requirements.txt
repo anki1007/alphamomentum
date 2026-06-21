@@ -7,7 +7,11 @@ requests
 plotly
 beautifulsoup4
 openpyxl
-quantstats>=0.0.81
-pyportfolioopt>=1.5.6
+quantstats
+pyportfolioopt
 scikit-learn
 scipy
+requests
+lxml
+html5lib
+beautifulsoup4
