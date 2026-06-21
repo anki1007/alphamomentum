@@ -164,7 +164,7 @@ INDEX_URLS = {
 BENCHMARK_TICKERS = {
     "Nifty 50 (NSEI)":  "^NSEI",
     "Nifty 200 (CNX200)":"^CNX200",
-    "Nifty 500 (CNX500)":"CRSLDX",
+    "Nifty 500 (CNX500)":"^CRSLDX",
 }
 
 PERIOD_DAYS = {"1y": 365, "2y": 730, "3y": 1095, "5y": 1825}
@@ -174,7 +174,7 @@ PERIOD_DAYS = {"1y": 365, "2y": 730, "3y": 1095, "5y": 1825}
 BENCHMARK_FALLBACKS = {
     "^NSEI":   ["^NSEI",   "NIFTYBEES.NS"],
     "^CNX200": ["^CNX200", "^NSEI",  "NIFTYBEES.NS"],
-    "^CNX500": ["CRSLDX",  "^CNX500", "^NSEI", "NIFTYBEES.NS"],
+    "^CNX500": ["^CRSLDX",  "^CNX500", "^NSEI", "NIFTYBEES.NS"],
 }
 
 HEADERS = {
@@ -855,13 +855,13 @@ def render_table(df):
     data_cols = [c for c in df.columns if c != "Chart"]
     df_data   = df[data_cols].copy()
 
-    styled = df_data.style.applymap(style_zone, subset=["Zone"])
+    styled = df_data.style.map(style_zone, subset=["Zone"])
     if "Retracement%" in data_cols:
-        styled = styled.applymap(color_retracement, subset=["Retracement%"])
+        styled = styled.map(color_retracement, subset=["Retracement%"])
     if "UPI" in data_cols:
-        styled = styled.applymap(color_upi, subset=["UPI"])
+        styled = styled.map(color_upi, subset=["UPI"])
     if "Sharpe" in data_cols:
-        styled = styled.applymap(color_sharpe, subset=["Sharpe"])
+        styled = styled.map(color_sharpe, subset=["Sharpe"])
     styled = (
         styled
         .format(fmt, na_rep="—")
@@ -934,7 +934,7 @@ st.markdown('<div class="section-title">Relative Strength Map — Top Candidates
 rs_df = display_df.head(top_n)[["Symbol", "RS252", "RS88", "CompositeRS", "UPI", "Sharpe", "Retracement%", "Zone"]].copy()
 st.dataframe(
     rs_df.style.background_gradient(subset=["RS252", "RS88", "CompositeRS"], cmap="RdYlGn", vmin=0, vmax=100)
-              .applymap(style_zone, subset=["Zone"])
+              .map(style_zone, subset=["Zone"])
               .format({"RS252":"{:.1f}", "RS88":"{:.1f}", "CompositeRS":"{:.1f}",
                        "UPI":"{:.3f}", "Sharpe":"{:.3f}", "Retracement%":"{:+.2f}%"}, na_rep="—")
               .set_properties(**{"font-family": "DM Mono, monospace", "font-size": "12px"}),
