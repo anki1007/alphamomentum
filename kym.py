@@ -60,6 +60,7 @@ CSV_FILES: Dict[str, str] = {
     "Nifty Midcap 150":    GITHUB_BASE + "niftymidcap150.csv",
     "Nifty Mid Small 400": GITHUB_BASE + "niftymidsmallcap400.csv",
     "Nifty Smallcap 250":  GITHUB_BASE + "niftysmallcap250.csv",
+    "Nifty Microcap 250":  GITHUB_BASE + "niftymicrocap250.csv",
     "Nifty Total Market":  GITHUB_BASE + "niftytotalmarket.csv",
 }
 
