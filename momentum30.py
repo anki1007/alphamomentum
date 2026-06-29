@@ -55,8 +55,10 @@ CSV_FILES: Dict[str, str] = {
     "Nifty 200":           GITHUB_BASE + "nifty200.csv",
     "Nifty 500":           GITHUB_BASE + "nifty500.csv",
     "Nifty Midcap 150":    GITHUB_BASE + "niftymidcap150.csv",
+    "Nifty Smallcap 250":  GITHUB_BASE + "niftysmallcap250.csv",  
     "Nifty Mid Small 400": GITHUB_BASE + "niftymidsmallcap400.csv",
-    "Nifty Smallcap 250":  GITHUB_BASE + "niftysmallcap250.csv",
+    "Nifty Microcap 250":  GITHUB_BASE + "niftymicrocap250.csv",
+    "Nifty Midsmall Micro 650":  GITHUB_BASE + "niftymsm650.csv",
     "Nifty Total Market":  GITHUB_BASE + "niftytotalmarket.csv",
 }
 RS_LOOKBACK_DAYS = 252
